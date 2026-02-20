@@ -89,8 +89,8 @@ export default function OrdersPage() {
 
   const getStatusBadge = (status: Order["status"]) => {
     const styles = {
-      pendiente: "bg-[#6A29B5] text-white hover:bg-[#6A29B5]",
-      en_revision: "bg-[#66C1C6] text-white hover:bg-[#66C1C6]",
+      pendiente: "bg-[#66C1C6] text-white hover:bg-[#66C1C6]",
+      en_revision: "bg-[#6A29B5] text-white hover:bg-[#6A29B5]",
       aprobado: "bg-[#E71D73] text-white hover:bg-[#E71D73]",
     }
     const labels = {

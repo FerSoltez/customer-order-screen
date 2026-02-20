@@ -25,23 +25,6 @@ export const metadata: Metadata = {
   title: "Dark Lion - Gestión de Pedidos",
   description: "Sistema de gestión de pedidos personalizados",
   generator: "v0.app",
-  icons: {
-    icon: [
-      {
-        url: "/icon-light-32x32.png",
-        media: "(prefers-color-scheme: light)",
-      },
-      {
-        url: "/icon-dark-32x32.png",
-        media: "(prefers-color-scheme: dark)",
-      },
-      {
-        url: "/icon.svg",
-        type: "image/svg+xml",
-      },
-    ],
-    apple: "/apple-icon.png",
-  },
 }
 
 export default function RootLayout({
@@ -51,6 +34,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="es">
+      <head>
+        <link rel="icon" href="/android-chrome-192x192.png" type="image/png" sizes="192x192" />
+      </head>
       <body className={`font-sans antialiased ${chakraPetch.variable} ${montserrat.variable}`}>
         {children}
         <Analytics />
