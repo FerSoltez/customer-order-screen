@@ -1,82 +1,140 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Search, FileImage, FileText, Eye, CheckCircle, Clock, Trash2, X, Bell, Download, Pencil } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { io } from "socket.io-client"
+
+const API_URL = "https://api-darklion.onrender.com"
+
+interface ApiOrder {
+  id_design: number
+  name: string
+  phone_number: string | null
+  email: string
+  created_at: string
+  status: string
+  document_url: string
+}
 
 interface Order {
   id: string
+  id_design: number
   nombre: string
   telefono: string
   email: string
   date: string
   status: "pendiente" | "en_revision" | "aprobado"
   image?: string
+  document_url?: string
 }
 
-const mockOrders: Order[] = [
-  {
-    id: "#ORD-772",
-    nombre: "Arath Balam",
-    telefono: "9991234567",
-    email: "dark.lion@gmail.com",
-    date: "12 Enero, 2026",
-    status: "en_revision",
-    image: "/sports-jersey-red-black.jpg",
-  },
-  {
-    id: "#ORD-771",
-    nombre: "Fernando Solano",
-    telefono: "9991234567",
-    email: "dark.lion@gmail.com",
-    date: "10 Enero, 2026",
-    status: "pendiente",
-    image: "/blue-sports-shirt.jpg",
-  },
-  {
-    id: "#ORD-770",
-    nombre: "Fernando Solano",
-    telefono: "9991234567",
-    email: "dark.lion@gmail.com",
-    date: "20 Dic, 2026",
-    status: "aprobado",
-    image: "/green-sports-jersey.jpg",
-  },
-  {
-    id: "#ORD-769",
-    nombre: "Carlos López",
-    telefono: "9997654321",
-    email: "carlos.lopez@gmail.com",
-    date: "18 Dic, 2026",
-    status: "aprobado",
-    image: "/white-sports-uniform.jpg",
-  },
-  {
-    id: "#ORD-768",
-    nombre: "Ana Martínez",
-    telefono: "9998765432",
-    email: "ana.martinez@gmail.com",
-    date: "15 Dic, 2026",
-    status: "pendiente",
-    image: "/yellow-team-shirt.jpg",
-  },
-]
+function mapApiStatus(status: string): Order["status"] {
+  switch (status) {
+    case "pending":
+      return "pendiente"
+    case "in_review":
+      return "en_revision"
+    case "approved":
+      return "aprobado"
+    default:
+      return "pendiente"
+  }
+}
+
+function mapApiOrder(apiOrder: ApiOrder): Order {
+  return {
+    id: `#ORD-${apiOrder.id_design}`,
+    id_design: apiOrder.id_design,
+    nombre: apiOrder.name,
+    telefono: apiOrder.phone_number || "Sin teléfono",
+    email: apiOrder.email,
+    date: apiOrder.created_at,
+    status: mapApiStatus(apiOrder.status),
+    document_url: apiOrder.document_url,
+  }
+}
 
 export default function OrdersPage() {
   const [searchTerm, setSearchTerm] = useState("")
-  const [selectedOrder, setSelectedOrder] = useState<Order | null>(mockOrders[0])
-  const [orders, setOrders] = useState<Order[]>(mockOrders)
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
+  const [orders, setOrders] = useState<Order[]>([])
   const [statusFilter, setStatusFilter] = useState<Order["status"] | "all">("all")
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [orderToDelete, setOrderToDelete] = useState<Order | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const [fetchError, setFetchError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+
+    // 1. Cargar pedidos existentes vía REST con reintentos
+    const fetchOrders = async (retries = 3): Promise<void> => {
+      for (let i = 0; i < retries; i++) {
+        try {
+          const res = await fetch(`${API_URL}/api/designs/orders`, {
+            method: "GET",
+          })
+          if (!res.ok) throw new Error(`HTTP ${res.status}`)
+          const data: ApiOrder[] = await res.json()
+          if (!cancelled) {
+            const mapped = data.map(mapApiOrder)
+            setOrders(mapped)
+            if (mapped.length > 0) setSelectedOrder(mapped[0])
+            setFetchError(null)
+          }
+          return
+        } catch (err) {
+          console.warn(`Intento ${i + 1}/${retries} falló:`, err)
+          if (i < retries - 1) {
+            // Esperar antes de reintentar (2s, 4s)
+            await new Promise((r) => setTimeout(r, (i + 1) * 2000))
+          } else if (!cancelled) {
+            setFetchError("No se pudo conectar al servidor. El servidor puede estar iniciando, intenta recargar en unos segundos.")
+          }
+        }
+      }
+    }
+
+    fetchOrders().finally(() => {
+      if (!cancelled) setIsLoading(false)
+    })
+
+    // 2. Conectar al WebSocket para recibir nuevos pedidos en tiempo real
+    const socket = io(API_URL, {
+      transports: ["websocket", "polling"],
+      reconnectionAttempts: 5,
+      reconnectionDelay: 2000,
+    })
+
+    socket.on("connect", () => {
+      console.log("Conectado al WebSocket:", socket.id)
+    })
+
+    socket.on("connect_error", (err) => {
+      console.warn("WebSocket error:", err.message)
+    })
+
+    socket.on("new_order", (newOrder: ApiOrder) => {
+      const mapped = mapApiOrder(newOrder)
+      setOrders((prev) => [mapped, ...prev])
+    })
+
+    // 3. Limpiar al desmontar
+    return () => {
+      cancelled = true
+      socket.disconnect()
+    }
+  }, [])
 
   const filteredOrders = orders.filter((order) => {
     const matchesSearch =
       order.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
       order.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      order.email.toLowerCase().includes(searchTerm.toLowerCase())
+      order.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      order.id_design.toString().includes(searchTerm)
     const matchesStatus = statusFilter === "all" || order.status === statusFilter
     return matchesSearch && matchesStatus
   })
@@ -101,13 +159,13 @@ export default function OrdersPage() {
     return <Badge className={`${styles[status]} font-medium px-4 py-1 rounded-full`}>{labels[status]}</Badge>
   }
 
-  const changeStatus = (orderId: string, clientName: string, newStatus: Order["status"]) => {
+  const changeStatus = (orderId: string, idDesign: number, newStatus: Order["status"]) => {
     setOrders((prev) =>
       prev.map((order) =>
-        order.id === orderId && order.nombre === clientName ? { ...order, status: newStatus } : order
+        order.id_design === idDesign ? { ...order, status: newStatus } : order
       )
     )
-    if (selectedOrder?.id === orderId && selectedOrder?.nombre === clientName) {
+    if (selectedOrder?.id_design === idDesign) {
       setSelectedOrder((prev) => (prev ? { ...prev, status: newStatus } : null))
     }
   }
@@ -119,8 +177,8 @@ export default function OrdersPage() {
 
   const confirmDelete = () => {
     if (orderToDelete) {
-      setOrders((prev) => prev.filter((o) => !(o.id === orderToDelete.id && o.nombre === orderToDelete.nombre)))
-      if (selectedOrder?.id === orderToDelete.id && selectedOrder?.nombre === orderToDelete.nombre) {
+      setOrders((prev) => prev.filter((o) => o.id_design !== orderToDelete.id_design))
+      if (selectedOrder?.id_design === orderToDelete.id_design) {
         setSelectedOrder(null)
       }
       setShowDeleteModal(false)
@@ -207,6 +265,28 @@ export default function OrdersPage() {
             <h2 className="text-xl font-bold text-white mb-4 text-center" style={{ fontFamily: 'Arboria-Black, sans-serif' }}>Pedidos Recientes</h2>
             <div className="w-full h-px bg-white mb-4" />
 
+            {/* Loading / Error states */}
+            {isLoading && (
+              <div className="text-center py-12">
+                <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-white border-t-transparent mb-3" />
+                <p className="text-white">Cargando pedidos...</p>
+                <p className="text-white/50 text-sm mt-1">El servidor puede tardar unos segundos en responder</p>
+              </div>
+            )}
+            {fetchError && !isLoading && (
+              <div className="text-center py-8">
+                <p className="text-red-400 mb-3">{fetchError}</p>
+                <Button
+                  className="bg-[#4C2C84] text-white hover:bg-[#6A29B5] rounded-full"
+                  onClick={() => window.location.reload()}
+                >
+                  Reintentar
+                </Button>
+              </div>
+            )}
+
+            {!isLoading && !fetchError && (
+            <>
             {/* Desktop Table */}
             <div className="hidden md:block overflow-x-auto">
               <table className="w-full">
@@ -222,8 +302,8 @@ export default function OrdersPage() {
                 <tbody>
                   {filteredOrders.map((order) => (
                     <tr
-                      key={order.id + order.nombre}
-                      className={`border-b border-white cursor-pointer transition-colors hover:bg-[#555555] ${selectedOrder?.id === order.id && selectedOrder?.nombre === order.nombre ? "bg-[#555555]" : ""}`}
+                      key={order.id_design}
+                      className={`border-b border-white cursor-pointer transition-colors hover:bg-[#555555] ${selectedOrder?.id_design === order.id_design ? "bg-[#555555]" : ""}`}
                       onClick={() => setSelectedOrder(order)}
                     >
                       <td className="py-4 px-4 text-white font-medium text-center font-[family-name:var(--font-montserrat)]">{order.id}</td>
@@ -266,8 +346,8 @@ export default function OrdersPage() {
             <div className="md:hidden space-y-3">
               {filteredOrders.map((order) => (
                 <div
-                  key={order.id + order.nombre}
-                  className={`bg-[#555555] rounded-xl p-4 cursor-pointer transition-all ${selectedOrder?.id === order.id && selectedOrder?.nombre === order.nombre ? "ring-2 ring-[#66C1C6]" : ""}`}
+                  key={order.id_design}
+                  className={`bg-[#555555] rounded-xl p-4 cursor-pointer transition-all ${selectedOrder?.id_design === order.id_design ? "ring-2 ring-[#66C1C6]" : ""}`}
                   onClick={() => setSelectedOrder(order)}
                 >
                   <div className="flex justify-between items-start mb-2">
@@ -292,13 +372,13 @@ export default function OrdersPage() {
                 </div>
               ))}
             </div>
+            </>
+            )}
           </div>
-
-          {/* Details Panel */}
           <div className="bg-[#444444] rounded-2xl p-4 md:p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-bold text-white" style={{ fontFamily: 'Arboria-Black, sans-serif' }}>DETALLES</h3>
-              {selectedOrder && <span className="text-white font-semibold" style={{ fontFamily: 'Arboria-Black, sans-serif' }}>{selectedOrder.id}</span>}
+              {selectedOrder && <span className="text-white font-semibold" style={{ fontFamily: 'Arboria-Black, sans-serif' }}>{selectedOrder.id} (ID: {selectedOrder.id_design})</span>}
             </div>
 
             {selectedOrder ? (
@@ -314,20 +394,20 @@ export default function OrdersPage() {
 
                 {/* Download Buttons */}
                 <div className="space-y-2">
-                  <button className="w-full flex items-center justify-between bg-[#555555] rounded-lg px-4 py-3 hover:bg-[#666666] transition-colors">
-                    <div className="flex items-center gap-3">
-                      <FileImage className="h-5 w-5 text-white" />
-                      <span className="text-white text-sm font-[family-name:var(--font-montserrat)]">{selectedOrder.nombre.replace(" ", "")}.img</span>
-                    </div>
-                    <Download className="h-4 w-4 text-white" />
-                  </button>
-                  <button className="w-full flex items-center justify-between bg-[#555555] rounded-lg px-4 py-3 hover:bg-[#666666] transition-colors">
-                    <div className="flex items-center gap-3">
-                      <FileText className="h-5 w-5 text-white" />
-                      <span className="text-white text-sm font-[family-name:var(--font-montserrat)]">{selectedOrder.nombre.replace(" ", "")}.xlsx</span>
-                    </div>
-                    <Download className="h-4 w-4 text-white" />
-                  </button>
+                  {selectedOrder.document_url && (
+                    <a
+                      href={selectedOrder.document_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="w-full flex items-center justify-between bg-[#555555] rounded-lg px-4 py-3 hover:bg-[#666666] transition-colors"
+                    >
+                      <div className="flex items-center gap-3">
+                        <FileText className="h-5 w-5 text-white" />
+                        <span className="text-white text-sm font-[family-name:var(--font-montserrat)]">{selectedOrder.nombre.replace(/ /g, "")}.xlsx</span>
+                      </div>
+                      <Download className="h-4 w-4 text-white" />
+                    </a>
+                  )}
                 </div>
 
                 {/* Contact Info */}
@@ -352,7 +432,7 @@ export default function OrdersPage() {
                 <div className="space-y-2">
                   <Button
                     className="w-full bg-[#66C1C6] text-white hover:bg-[#55b0b5] rounded-full font-semibold font-[family-name:var(--font-montserrat)]"
-                    onClick={() => changeStatus(selectedOrder.id, selectedOrder.nombre, "pendiente")}
+                    onClick={() => changeStatus(selectedOrder.id, selectedOrder.id_design, "pendiente")}
                     disabled={selectedOrder.status === "pendiente"}
                   >
                     <Eye className="h-4 w-4 mr-2" />
@@ -360,7 +440,7 @@ export default function OrdersPage() {
                   </Button>
                   <Button
                     className="w-full bg-[#743EB3] text-white hover:bg-[#6A29B5] rounded-full font-semibold font-[family-name:var(--font-montserrat)]"
-                    onClick={() => changeStatus(selectedOrder.id, selectedOrder.nombre, "en_revision")}
+                    onClick={() => changeStatus(selectedOrder.id, selectedOrder.id_design, "en_revision")}
                     disabled={selectedOrder.status === "en_revision"}
                   >
                     <Clock className="h-4 w-4 mr-2" />
@@ -368,7 +448,7 @@ export default function OrdersPage() {
                   </Button>
                   <Button
                     className="w-full bg-[#E71D73] text-white hover:bg-[#d01a68] rounded-full font-semibold font-[family-name:var(--font-montserrat)]"
-                    onClick={() => changeStatus(selectedOrder.id, selectedOrder.nombre, "aprobado")}
+                    onClick={() => changeStatus(selectedOrder.id, selectedOrder.id_design, "aprobado")}
                     disabled={selectedOrder.status === "aprobado"}
                   >
                     <CheckCircle className="h-4 w-4 mr-2" />
