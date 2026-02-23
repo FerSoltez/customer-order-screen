@@ -16,6 +16,7 @@ interface ApiOrder {
   email: string
   created_at: string
   status: string
+  design_file_url?: string
   document_url: string
 }
 
@@ -32,12 +33,15 @@ interface Order {
 }
 
 function mapApiStatus(status: string): Order["status"] {
-  switch (status) {
+  switch (status.toLowerCase()) {
     case "pending":
+    case "pendiente":
       return "pendiente"
     case "in_review":
+    case "en_revision":
       return "en_revision"
     case "approved":
+    case "aprobado":
       return "aprobado"
     default:
       return "pendiente"
@@ -53,6 +57,7 @@ function mapApiOrder(apiOrder: ApiOrder): Order {
     email: apiOrder.email,
     date: apiOrder.created_at,
     status: mapApiStatus(apiOrder.status),
+    image: apiOrder.design_file_url?.trim() || undefined,
     document_url: apiOrder.document_url,
   }
 }
@@ -120,6 +125,17 @@ export default function OrdersPage() {
     socket.on("new_order", (newOrder: ApiOrder) => {
       const mapped = mapApiOrder(newOrder)
       setOrders((prev) => [mapped, ...prev])
+    })
+
+    // Pedido actualizado
+    socket.on("update_order", (updatedOrder: ApiOrder) => {
+      const mapped = mapApiOrder(updatedOrder)
+      setOrders((prev) =>
+        prev.map((o) => (o.id_design === mapped.id_design ? mapped : o))
+      )
+      setSelectedOrder((prev) =>
+        prev && prev.id_design === mapped.id_design ? mapped : prev
+      )
     })
 
     // 3. Limpiar al desmontar
@@ -395,11 +411,17 @@ export default function OrdersPage() {
               <div className="space-y-4">
                 {/* Order Image */}
                 <div className="flex justify-center">
-                  <img
-                    src={selectedOrder.image || "/placeholder.svg"}
-                    alt="Product preview"
-                    className="w-full max-w-[200px] h-auto aspect-square object-cover rounded-lg border border-[#888888]/20"
-                  />
+                  {selectedOrder.image ? (
+                    <img
+                      src={selectedOrder.image}
+                      alt="Product preview"
+                      className="w-full max-w-[300px] h-auto max-h-[400px] object-contain rounded-lg border border-[#888888]/20"
+                    />
+                  ) : (
+                    <div className="w-full max-w-[200px] aspect-square rounded-lg border border-[#888888]/20 flex items-center justify-center bg-[#555555]">
+                      <FileImage className="h-12 w-12 text-white/40" />
+                    </div>
+                  )}
                 </div>
 
                 {/* Download Buttons */}
