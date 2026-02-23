@@ -175,14 +175,24 @@ export default function OrdersPage() {
     setShowDeleteModal(true)
   }
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (orderToDelete) {
-      setOrders((prev) => prev.filter((o) => o.id_design !== orderToDelete.id_design))
-      if (selectedOrder?.id_design === orderToDelete.id_design) {
-        setSelectedOrder(null)
+      try {
+        const res = await fetch(`${API_URL}/api/designs/${orderToDelete.id_design}`, {
+          method: "DELETE",
+        })
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        setOrders((prev) => prev.filter((o) => o.id_design !== orderToDelete.id_design))
+        if (selectedOrder?.id_design === orderToDelete.id_design) {
+          setSelectedOrder(null)
+        }
+      } catch (err) {
+        console.error("Error al eliminar pedido:", err)
+        alert("No se pudo eliminar el pedido. Intenta de nuevo.")
+      } finally {
+        setShowDeleteModal(false)
+        setOrderToDelete(null)
       }
-      setShowDeleteModal(false)
-      setOrderToDelete(null)
     }
   }
 
