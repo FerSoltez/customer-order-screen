@@ -452,7 +452,7 @@ export default function OrdersPage() {
                         onClick={markAllRead}
                         className="text-[#66C1C6] text-xs hover:underline"
                       >
-                        Marcar como le\u00eddas
+                        Marcar como leídas
                       </button>
                     )}
                   </div>
