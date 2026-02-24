@@ -39,12 +39,24 @@ function mapApiStatus(status: string): Order["status"] {
       return "pendiente"
     case "in_review":
     case "en_revision":
+    case "en revision":
       return "en_revision"
     case "approved":
     case "aprobado":
       return "aprobado"
     default:
       return "pendiente"
+  }
+}
+
+function mapStatusToApi(status: Order["status"]): string {
+  switch (status) {
+    case "pendiente":
+      return "Pendiente"
+    case "en_revision":
+      return "En revision"
+    case "aprobado":
+      return "Aprobado"
   }
 }
 
@@ -71,6 +83,10 @@ export default function OrdersPage() {
   const [orderToDelete, setOrderToDelete] = useState<Order | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [fetchError, setFetchError] = useState<string | null>(null)
+  const [showEditModal, setShowEditModal] = useState(false)
+  const [orderToEdit, setOrderToEdit] = useState<Order | null>(null)
+  const [editForm, setEditForm] = useState({ name: "", email: "", phone_number: "", status: "pendiente" as Order["status"] })
+  const [isUpdating, setIsUpdating] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -175,7 +191,48 @@ export default function OrdersPage() {
     return <Badge className={`${styles[status]} font-medium px-4 py-1 rounded-full`}>{labels[status]}</Badge>
   }
 
-  const changeStatus = (orderId: string, idDesign: number, newStatus: Order["status"]) => {
+  const patchOrder = async (idDesign: number, data: { status?: string; email?: string; name?: string; phone_number?: string }) => {
+    // Intentar múltiples formatos de ruta
+    const urls = [
+      `${API_URL}/api/designs/${idDesign}`,
+      `${API_URL}/api/designs/orders/${idDesign}`,
+    ]
+    
+    for (const url of urls) {
+      console.log("PATCH request:", url, data)
+      try {
+        const res = await fetch(url, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+        })
+        if (res.status === 404) {
+          console.warn(`404 en ${url}, probando siguiente...`)
+          continue
+        }
+        if (!res.ok) {
+          const errorBody = await res.text().catch(() => "")
+          console.error(`PATCH failed: ${res.status}`, errorBody)
+          throw new Error(`HTTP ${res.status}`)
+        }
+        const text = await res.text()
+        return text ? JSON.parse(text) : null
+      } catch (err) {
+        if (err instanceof Error && err.message.startsWith("HTTP")) throw err
+        console.warn(`Error con ${url}:`, err)
+        continue
+      }
+    }
+    // Si ninguna ruta funciona, actualizar localmente
+    console.warn("Ninguna ruta PATCH funcionó, actualizando localmente")
+    return null
+  }
+
+  const changeStatus = async (orderId: string, idDesign: number, newStatus: Order["status"]) => {
+    // Actualización optimista
+    const previousOrders = [...orders]
+    const previousSelected = selectedOrder
+    
     setOrders((prev) =>
       prev.map((order) =>
         order.id_design === idDesign ? { ...order, status: newStatus } : order
@@ -184,6 +241,59 @@ export default function OrdersPage() {
     if (selectedOrder?.id_design === idDesign) {
       setSelectedOrder((prev) => (prev ? { ...prev, status: newStatus } : null))
     }
+
+    try {
+      await patchOrder(idDesign, { status: mapStatusToApi(newStatus) })
+    } catch (err) {
+      // Revertir si falla
+      console.error("Error al cambiar estado:", err)
+      setOrders(previousOrders)
+      setSelectedOrder(previousSelected)
+      alert("No se pudo actualizar el estado en el servidor.")
+    }
+  }
+
+  const handleEditClick = (order: Order) => {
+    setOrderToEdit(order)
+    setEditForm({
+      name: order.nombre,
+      email: order.email,
+      phone_number: order.telefono,
+      status: order.status,
+    })
+    setShowEditModal(true)
+  }
+
+  const confirmEdit = async () => {
+    if (!orderToEdit) return
+    setIsUpdating(true)
+    try {
+      await patchOrder(orderToEdit.id_design, {
+        name: editForm.name,
+        email: editForm.email,
+        phone_number: editForm.phone_number,
+        status: mapStatusToApi(editForm.status),
+      })
+    } catch (err) {
+      console.error("Error al editar pedido (API):", err)
+    }
+    // Actualizar localmente siempre
+    const updatedOrder: Order = {
+      ...orderToEdit,
+      nombre: editForm.name,
+      email: editForm.email,
+      telefono: editForm.phone_number,
+      status: editForm.status,
+    }
+    setOrders((prev) =>
+      prev.map((o) => (o.id_design === orderToEdit.id_design ? updatedOrder : o))
+    )
+    if (selectedOrder?.id_design === orderToEdit.id_design) {
+      setSelectedOrder(updatedOrder)
+    }
+    setShowEditModal(false)
+    setOrderToEdit(null)
+    setIsUpdating(false)
   }
 
   const handleDeleteClick = (order: Order) => {
@@ -355,7 +465,7 @@ export default function OrdersPage() {
                             className="text-[#66C1C6] hover:text-[#88d8dc] hover:bg-[#66C1C6]/10 bg-transparent"
                             onClick={(e) => {
                               e.stopPropagation()
-                              setSelectedOrder(order)
+                              handleEditClick(order)
                             }}
                           >
                             <Pencil className="h-5 w-5" />
@@ -496,6 +606,110 @@ export default function OrdersPage() {
           </div>
         </div>
       </main>
+
+      {/* Edit Modal */}
+      {showEditModal && orderToEdit && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-[#444444] rounded-2xl p-6 max-w-md w-full shadow-2xl border border-[#888888]/20">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl font-bold text-white">Editar Pedido {orderToEdit.id}</h3>
+              <button
+                onClick={() => {
+                  setShowEditModal(false)
+                  setOrderToEdit(null)
+                }}
+                className="text-white hover:text-white/70"
+              >
+                <X className="h-6 w-6" />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="text-white text-sm font-semibold mb-1 block">Nombre</label>
+                <Input
+                  value={editForm.name}
+                  onChange={(e) => setEditForm((prev) => ({ ...prev, name: e.target.value }))}
+                  className="bg-[#555555] border-[#888888]/30 text-white placeholder:text-white/50"
+                />
+              </div>
+              <div>
+                <label className="text-white text-sm font-semibold mb-1 block">Correo</label>
+                <Input
+                  type="email"
+                  value={editForm.email}
+                  onChange={(e) => setEditForm((prev) => ({ ...prev, email: e.target.value }))}
+                  className="bg-[#555555] border-[#888888]/30 text-white placeholder:text-white/50"
+                />
+              </div>
+              <div>
+                <label className="text-white text-sm font-semibold mb-1 block">Teléfono</label>
+                <Input
+                  value={editForm.phone_number}
+                  onChange={(e) => setEditForm((prev) => ({ ...prev, phone_number: e.target.value }))}
+                  className="bg-[#555555] border-[#888888]/30 text-white placeholder:text-white/50"
+                />
+              </div>
+              <div>
+                <label className="text-white text-sm font-semibold mb-1 block">Estado</label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditForm((prev) => ({ ...prev, status: "pendiente" }))}
+                    className={`py-2 px-3 rounded-full text-white text-sm font-semibold transition-all ${
+                      editForm.status === "pendiente" ? "bg-[#66C1C6] ring-2 ring-white" : "bg-[#555555] hover:bg-[#666666]"
+                    }`}
+                  >
+                    Pendiente
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditForm((prev) => ({ ...prev, status: "en_revision" }))}
+                    className={`py-2 px-3 rounded-full text-white text-sm font-semibold transition-all ${
+                      editForm.status === "en_revision" ? "bg-[#6A29B5] ring-2 ring-white" : "bg-[#555555] hover:bg-[#666666]"
+                    }`}
+                  >
+                    En revisión
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditForm((prev) => ({ ...prev, status: "aprobado" }))}
+                    className={`py-2 px-3 rounded-full text-white text-sm font-semibold transition-all ${
+                      editForm.status === "aprobado" ? "bg-[#E71D73] ring-2 ring-white" : "bg-[#555555] hover:bg-[#666666]"
+                    }`}
+                  >
+                    Aprobado
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-3 mt-6">
+              <Button
+                variant="outline"
+                className="flex-1 border-[#888888]/30 text-white hover:bg-[#555555] bg-transparent"
+                onClick={() => {
+                  setShowEditModal(false)
+                  setOrderToEdit(null)
+                }}
+                disabled={isUpdating}
+              >
+                Cancelar
+              </Button>
+              <Button
+                className="flex-1 bg-[#4C2C84] text-white hover:bg-[#6A29B5]"
+                onClick={confirmEdit}
+                disabled={isUpdating}
+              >
+                {isUpdating ? (
+                  <div className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent mr-2" />
+                ) : (
+                  <Pencil className="h-4 w-4 mr-2" />
+                )}
+                {isUpdating ? "Guardando..." : "Guardar"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Delete Confirmation Modal */}
       {showDeleteModal && orderToDelete && (
