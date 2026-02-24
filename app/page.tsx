@@ -32,6 +32,14 @@ interface Order {
   document_url?: string
 }
 
+interface AppNotification {
+  id: number
+  title: string
+  body: string
+  timestamp: Date
+  read: boolean
+}
+
 function mapApiStatus(status: string): Order["status"] {
   switch (status.toLowerCase()) {
     case "pending":
@@ -88,6 +96,21 @@ export default function OrdersPage() {
   const [editForm, setEditForm] = useState({ name: "", email: "", phone_number: "", status: "pendiente" as Order["status"] })
   const [isUpdating, setIsUpdating] = useState(false)
   const [notifPermission, setNotifPermission] = useState<NotificationPermission | "unsupported">("default")
+  const [notifications, setNotifications] = useState<AppNotification[]>([])
+  const [showNotifPanel, setShowNotifPanel] = useState(false)
+
+  const unreadCount = notifications.filter((n) => !n.read).length
+
+  const addNotification = (title: string, body: string) => {
+    setNotifications((prev) => [
+      { id: Date.now(), title, body, timestamp: new Date(), read: false },
+      ...prev,
+    ])
+  }
+
+  const markAllRead = () => {
+    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })))
+  }
 
   // Push notifications subscription
   useEffect(() => {
@@ -124,23 +147,14 @@ export default function OrdersPage() {
   }
 
   const handleNotificationClick = async () => {
-    if (notifPermission === "unsupported") {
-      alert("Tu navegador no soporta notificaciones push.")
-      return
-    }
-    if (notifPermission === "denied") {
-      alert("Las notificaciones están bloqueadas. Actívalas desde la configuración del navegador.")
-      return
-    }
     if (notifPermission === "default") {
       const perm = await Notification.requestPermission()
       setNotifPermission(perm)
       if (perm === "granted") {
         await subscribeToPush()
       }
-    } else {
-      alert("Las notificaciones ya están activadas.")
     }
+    setShowNotifPanel((prev) => !prev)
   }
 
   useEffect(() => {
@@ -196,6 +210,7 @@ export default function OrdersPage() {
     socket.on("new_order", (newOrder: ApiOrder) => {
       const mapped = mapApiOrder(newOrder)
       setOrders((prev) => [mapped, ...prev])
+      addNotification("Nuevo pedido", `Pedido #ORD-${newOrder.id_design} de ${newOrder.name}`)
     })
 
     // Pedido actualizado
@@ -207,6 +222,7 @@ export default function OrdersPage() {
       setSelectedOrder((prev) =>
         prev && prev.id_design === mapped.id_design ? mapped : prev
       )
+      addNotification("Pedido actualizado", `Pedido #ORD-${updatedOrder.id_design} - Estado: ${updatedOrder.status}`)
     })
 
     // 3. Limpiar al desmontar
@@ -217,11 +233,13 @@ export default function OrdersPage() {
   }, [])
 
   const filteredOrders = orders.filter((order) => {
+    const search = searchTerm.toLowerCase()
     const matchesSearch =
-      order.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      order.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      order.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      order.id_design.toString().includes(searchTerm)
+      order.id.toLowerCase().includes(search) ||
+      order.nombre.toLowerCase().includes(search) ||
+      order.email.toLowerCase().includes(search) ||
+      order.id_design.toString().includes(search) ||
+      order.date.toLowerCase().includes(search)
     const matchesStatus = statusFilter === "all" || order.status === statusFilter
     return matchesSearch && matchesStatus
   })
@@ -239,7 +257,7 @@ export default function OrdersPage() {
       aprobado: "bg-[#E71D73] text-white hover:bg-[#E71D73]",
     }
     const labels = {
-      pendiente: "Pendientes",
+      pendiente: "Pendiente",
       en_revision: "En revision",
       aprobado: "Aprobado",
     }
@@ -400,21 +418,78 @@ export default function OrdersPage() {
           </div>
 
           {/* Bell icon */}
-          <button
-            className={`relative transition-colors flex-shrink-0 ${
-              notifPermission === "granted" ? "text-[#66C1C6]" : "text-white hover:text-[#66C1C6]"
-            }`}
-            aria-label="Notificaciones"
-            onClick={handleNotificationClick}
-          >
-            <Bell className="h-6 w-6" />
-            {notifPermission === "granted" && (
-              <span className="absolute -top-1 -right-1 h-2.5 w-2.5 bg-green-500 rounded-full border-2 border-[#4C2C84]" />
+          <div className="relative flex-shrink-0">
+            <button
+              className={`relative transition-colors ${
+                notifPermission === "granted" ? "text-[#66C1C6]" : "text-white hover:text-[#66C1C6]"
+              }`}
+              aria-label="Notificaciones"
+              onClick={handleNotificationClick}
+            >
+              <Bell className="h-6 w-6" />
+              {unreadCount > 0 && (
+                <span className="absolute -top-2 -right-2 h-5 w-5 bg-red-500 rounded-full text-white text-xs flex items-center justify-center font-bold border-2 border-[#4C2C84]">
+                  {unreadCount > 9 ? "9+" : unreadCount}
+                </span>
+              )}
+              {unreadCount === 0 && notifPermission === "granted" && (
+                <span className="absolute -top-1 -right-1 h-2.5 w-2.5 bg-green-500 rounded-full border-2 border-[#4C2C84]" />
+              )}
+              {notifPermission === "default" && (
+                <span className="absolute -top-1 -right-1 h-2.5 w-2.5 bg-yellow-500 rounded-full border-2 border-[#4C2C84] animate-pulse" />
+              )}
+            </button>
+
+            {/* Notification Panel */}
+            {showNotifPanel && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setShowNotifPanel(false)} />
+                <div className="absolute right-0 top-10 w-80 max-h-96 bg-[#333333] rounded-xl shadow-2xl border border-[#555555] z-50 overflow-hidden">
+                  <div className="flex items-center justify-between px-4 py-3 border-b border-[#555555]">
+                    <h4 className="text-white font-bold text-sm">Notificaciones</h4>
+                    {unreadCount > 0 && (
+                      <button
+                        onClick={markAllRead}
+                        className="text-[#66C1C6] text-xs hover:underline"
+                      >
+                        Marcar como le\u00eddas
+                      </button>
+                    )}
+                  </div>
+                  <div className="overflow-y-auto max-h-80">
+                    {notifications.length === 0 ? (
+                      <div className="px-4 py-8 text-center">
+                        <Bell className="h-8 w-8 text-white/30 mx-auto mb-2" />
+                        <p className="text-white/50 text-sm">No hay notificaciones</p>
+                      </div>
+                    ) : (
+                      notifications.map((notif) => (
+                        <div
+                          key={notif.id}
+                          className={`px-4 py-3 border-b border-[#444444] hover:bg-[#444444] transition-colors ${
+                            !notif.read ? "bg-[#3a3a4a]" : ""
+                          }`}
+                        >
+                          <div className="flex items-start gap-2">
+                            {!notif.read && (
+                              <span className="h-2 w-2 bg-[#66C1C6] rounded-full mt-1.5 flex-shrink-0" />
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <p className="text-white text-sm font-semibold">{notif.title}</p>
+                              <p className="text-white/70 text-xs mt-0.5">{notif.body}</p>
+                              <p className="text-white/40 text-xs mt-1">
+                                {notif.timestamp.toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" })}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </>
             )}
-            {notifPermission === "default" && (
-              <span className="absolute -top-1 -right-1 h-2.5 w-2.5 bg-yellow-500 rounded-full border-2 border-[#4C2C84] animate-pulse" />
-            )}
-          </button>
+          </div>
         </div>
       </header>
 
@@ -453,7 +528,7 @@ export default function OrdersPage() {
         {statusFilter !== "all" && (
           <div className="mb-4 flex items-center justify-center gap-2">
             <span className="text-white font-semibold">
-              Filtro activo: {statusFilter === "pendiente" ? "Pendientes" : statusFilter === "en_revision" ? "En revision" : "Aprobados"}
+              Filtro activo: {statusFilter === "pendiente" ? "Pendiente" : statusFilter === "en_revision" ? "En revision" : "Aprobados"}
             </span>
             <button onClick={() => setStatusFilter("all")} className="text-[#66C1C6] hover:text-[#88d8dc] underline text-sm">
               Limpiar filtro
@@ -645,7 +720,7 @@ export default function OrdersPage() {
                     disabled={selectedOrder.status === "pendiente"}
                   >
                     <Eye className="h-4 w-4 mr-2" />
-                    Pendientes
+                    Pendiente
                   </Button>
                   <Button
                     className="w-full bg-[#743EB3] text-white hover:bg-[#6A29B5] rounded-full font-semibold font-[family-name:var(--font-montserrat)]"
