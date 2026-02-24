@@ -87,6 +87,61 @@ export default function OrdersPage() {
   const [orderToEdit, setOrderToEdit] = useState<Order | null>(null)
   const [editForm, setEditForm] = useState({ name: "", email: "", phone_number: "", status: "pendiente" as Order["status"] })
   const [isUpdating, setIsUpdating] = useState(false)
+  const [notifPermission, setNotifPermission] = useState<NotificationPermission | "unsupported">("default")
+
+  // Push notifications subscription
+  useEffect(() => {
+    if (typeof window === "undefined" || !("serviceWorker" in navigator) || !("PushManager" in window)) {
+      setNotifPermission("unsupported")
+      return
+    }
+
+    setNotifPermission(Notification.permission)
+
+    if (Notification.permission === "granted") {
+      subscribeToPush()
+    }
+  }, [])
+
+  const subscribeToPush = async () => {
+    try {
+      const registration = await navigator.serviceWorker.register("/sw.js")
+      const res = await fetch(`${API_URL}/api/push/vapid-public-key`)
+      const { publicKey } = await res.json()
+      const subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: publicKey,
+      })
+      await fetch(`${API_URL}/api/push/subscribe`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(subscription),
+      })
+      console.log("Push notifications: suscrito correctamente")
+    } catch (err) {
+      console.warn("Push notifications: error al suscribir", err)
+    }
+  }
+
+  const handleNotificationClick = async () => {
+    if (notifPermission === "unsupported") {
+      alert("Tu navegador no soporta notificaciones push.")
+      return
+    }
+    if (notifPermission === "denied") {
+      alert("Las notificaciones están bloqueadas. Actívalas desde la configuración del navegador.")
+      return
+    }
+    if (notifPermission === "default") {
+      const perm = await Notification.requestPermission()
+      setNotifPermission(perm)
+      if (perm === "granted") {
+        await subscribeToPush()
+      }
+    } else {
+      alert("Las notificaciones ya están activadas.")
+    }
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -345,8 +400,20 @@ export default function OrdersPage() {
           </div>
 
           {/* Bell icon */}
-          <button className="text-white hover:text-[#66C1C6] transition-colors flex-shrink-0" aria-label="Notificaciones">
+          <button
+            className={`relative transition-colors flex-shrink-0 ${
+              notifPermission === "granted" ? "text-[#66C1C6]" : "text-white hover:text-[#66C1C6]"
+            }`}
+            aria-label="Notificaciones"
+            onClick={handleNotificationClick}
+          >
             <Bell className="h-6 w-6" />
+            {notifPermission === "granted" && (
+              <span className="absolute -top-1 -right-1 h-2.5 w-2.5 bg-green-500 rounded-full border-2 border-[#4C2C84]" />
+            )}
+            {notifPermission === "default" && (
+              <span className="absolute -top-1 -right-1 h-2.5 w-2.5 bg-yellow-500 rounded-full border-2 border-[#4C2C84] animate-pulse" />
+            )}
           </button>
         </div>
       </header>
