@@ -147,6 +147,25 @@ export default function OrdersPage() {
     }
   }
 
+  const downloadImage = async (url: string, filename: string) => {
+    try {
+      const res = await fetch(url, { mode: 'cors' })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const blob = await res.blob()
+      const blobUrl = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = blobUrl
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(blobUrl)
+    } catch (err) {
+      console.warn('Download failed, opening in new tab as fallback', err)
+      window.open(url, '_blank')
+    }
+  }
+
   const handleNotificationClick = async () => {
     if (notifPermission === "default") {
       const perm = await Notification.requestPermission()
@@ -705,9 +724,13 @@ export default function OrdersPage() {
                   {selectedOrder.image && (
                     <a
                       href={selectedOrder.image}
-                      target="_blank"
+                      // prevent default navigation and fetch the image to force download
+                      onClick={(e) => {
+                        e.preventDefault()
+                        const filename = (selectedOrder.image || '').split('/').pop() || `${selectedOrder.nombre.replace(/ /g, '')}.png`
+                        downloadImage(selectedOrder.image as string, filename)
+                      }}
                       rel="noreferrer"
-                      download={selectedOrder.image.split('/').pop() || ''}
                       className="w-full flex items-center justify-between bg-[#555555] rounded-lg px-4 py-3 hover:bg-[#666666] transition-colors"
                     >
                       <div className="flex items-center gap-3">
