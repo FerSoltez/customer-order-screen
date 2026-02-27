@@ -95,6 +95,7 @@ export default function OrdersPage() {
   const [orderToEdit, setOrderToEdit] = useState<Order | null>(null)
   const [editForm, setEditForm] = useState({ name: "", email: "", phone_number: "", status: "pendiente" as Order["status"] })
   const [isUpdating, setIsUpdating] = useState(false)
+  const [editErrors, setEditErrors] = useState<{ name?: string; email?: string; phone_number?: string }>({})
   const [notifPermission, setNotifPermission] = useState<NotificationPermission | "unsupported">("default")
   const [notifications, setNotifications] = useState<AppNotification[]>([])
   const [showNotifPanel, setShowNotifPanel] = useState(false)
@@ -334,11 +335,34 @@ export default function OrdersPage() {
       phone_number: order.telefono,
       status: order.status,
     })
+    setEditErrors({})
     setShowEditModal(true)
   }
 
   const confirmEdit = async () => {
     if (!orderToEdit) return
+    // Validaciones inline
+    const errors: { name?: string; email?: string; phone_number?: string } = {}
+    if (!editForm.name.trim()) {
+      errors.name = "El nombre es obligatorio."
+    }
+    if (!editForm.email.trim()) {
+      errors.email = "El correo es obligatorio."
+    } else if (!/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(editForm.email.trim())) {
+      errors.email = "El correo no tiene un formato válido."
+    }
+    if (!editForm.phone_number.trim()) {
+      errors.phone_number = "El teléfono es obligatorio."
+    } else if (!/^\d+$/.test(editForm.phone_number.trim())) {
+      errors.phone_number = "El teléfono solo debe contener números."
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setEditErrors(errors)
+      return
+    }
+
+    setEditErrors({})
     setIsUpdating(true)
     try {
       await patchOrder(orderToEdit.id_design, {
@@ -678,6 +702,22 @@ export default function OrdersPage() {
 
                 {/* Download Buttons */}
                 <div className="space-y-2">
+                  {selectedOrder.image && (
+                    <a
+                      href={selectedOrder.image}
+                      target="_blank"
+                      rel="noreferrer"
+                      download={selectedOrder.image.split('/').pop() || ''}
+                      className="w-full flex items-center justify-between bg-[#555555] rounded-lg px-4 py-3 hover:bg-[#666666] transition-colors"
+                    >
+                      <div className="flex items-center gap-3">
+                        <FileImage className="h-5 w-5 text-white" />
+                        <span className="text-white text-sm font-[family-name:var(--font-montserrat)]">Descargar imagen</span>
+                      </div>
+                      <Download className="h-4 w-4 text-white" />
+                    </a>
+                  )}
+
                   {selectedOrder.document_url && (
                     <a
                       href={selectedOrder.document_url}
@@ -706,9 +746,7 @@ export default function OrdersPage() {
                   <p className="text-white">{selectedOrder.telefono}</p>
                   <p className="text-white mt-2">
                     <span className="font-bold">CORREO:</span>{" "}
-                    <a href={`mailto:${selectedOrder.email}`} className="text-[#66C1C6] underline">
-                      {selectedOrder.email}
-                    </a>
+                    <span className="text-white">{selectedOrder.email}</span>
                   </p>
                 </div>
 
@@ -770,26 +808,43 @@ export default function OrdersPage() {
                 <label className="text-white text-sm font-semibold mb-1 block">Nombre</label>
                 <Input
                   value={editForm.name}
-                  onChange={(e) => setEditForm((prev) => ({ ...prev, name: e.target.value }))}
-                  className="bg-[#555555] border-[#888888]/30 text-white placeholder:text-white/50"
+                  onChange={(e) => {
+                    setEditForm((prev) => ({ ...prev, name: e.target.value }))
+                    setEditErrors((prev) => ({ ...prev, name: undefined }))
+                  }}
+                  className={`bg-[#555555] text-white placeholder:text-white/50 ${editErrors.name ? "border-red-400" : "border-[#888888]/30"}`}
                 />
+                {editErrors.name && <p className="text-sm text-red-400 mt-1">{editErrors.name}</p>}
               </div>
               <div>
                 <label className="text-white text-sm font-semibold mb-1 block">Correo</label>
                 <Input
                   type="email"
                   value={editForm.email}
-                  onChange={(e) => setEditForm((prev) => ({ ...prev, email: e.target.value }))}
-                  className="bg-[#555555] border-[#888888]/30 text-white placeholder:text-white/50"
+                  onChange={(e) => {
+                    setEditForm((prev) => ({ ...prev, email: e.target.value }))
+                    setEditErrors((prev) => ({ ...prev, email: undefined }))
+                  }}
+                  className={`bg-[#555555] text-white placeholder:text-white/50 ${editErrors.email ? "border-red-400" : "border-[#888888]/30"}`}
+                  style={{ textDecoration: 'none', color: 'white' }}
                 />
+                {editErrors.email && <p className="text-sm text-red-400 mt-1">{editErrors.email}</p>}
               </div>
               <div>
                 <label className="text-white text-sm font-semibold mb-1 block">Teléfono</label>
                 <Input
+                  inputMode="tel"
+                  pattern="[0-9]*"
+                  maxLength={15}
                   value={editForm.phone_number}
-                  onChange={(e) => setEditForm((prev) => ({ ...prev, phone_number: e.target.value }))}
-                  className="bg-[#555555] border-[#888888]/30 text-white placeholder:text-white/50"
+                  onChange={(e) => {
+                    const digitsOnly = e.target.value.replace(/\D/g, "")
+                    setEditForm((prev) => ({ ...prev, phone_number: digitsOnly }))
+                    setEditErrors((prev) => ({ ...prev, phone_number: undefined }))
+                  }}
+                  className={`bg-[#555555] text-white placeholder:text-white/50 ${editErrors.phone_number ? "border-red-400" : "border-[#888888]/30"}`}
                 />
+                {editErrors.phone_number && <p className="text-sm text-red-400 mt-1">{editErrors.phone_number}</p>}
               </div>
               <div>
                 <label className="text-white text-sm font-semibold mb-1 block">Estado</label>
