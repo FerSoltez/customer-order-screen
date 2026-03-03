@@ -67,7 +67,18 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#000000] flex items-center justify-center p-4 overflow-hidden">
+    <div className="min-h-screen bg-[#000000] flex items-center justify-center p-4 overflow-hidden" style={{ backgroundColor: "#000000" }}>
+      {/* Force input styles in production */}
+      <style>{`
+        .login-input::placeholder { color: rgba(255,255,255,0.4); }
+        .login-input:-webkit-autofill,
+        .login-input:-webkit-autofill:hover,
+        .login-input:-webkit-autofill:focus {
+          -webkit-box-shadow: 0 0 0 30px #555555 inset !important;
+          -webkit-text-fill-color: #ffffff !important;
+          caret-color: #ffffff;
+        }
+      `}</style>
       {/* Ambient light effects */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden">
         {/* Top-left pink glow */}
@@ -124,11 +135,12 @@ export default function LoginPage() {
                     setErrors((prev) => ({ ...prev, email: undefined, general: undefined }))
                   }}
                   placeholder="correo@ejemplo.com"
-                  className={`w-full pl-10 pr-4 py-3 bg-[#555555] rounded-lg text-white placeholder:text-white/40 outline-none transition-all ${
+                  className={`login-input w-full pl-10 pr-4 py-3 rounded-lg outline-none transition-all appearance-none ${
                     errors.email
                       ? "border-2 border-red-400 focus:border-red-400"
                       : "border border-[#888888]/30 focus:border-[#66C1C6]"
                   }`}
+                  style={{ backgroundColor: "#555555", color: "#ffffff", colorScheme: "dark" }}
                 />
               </div>
               {errors.email && <p className="text-sm text-red-400 mt-1">{errors.email}</p>}
@@ -147,11 +159,12 @@ export default function LoginPage() {
                     setErrors((prev) => ({ ...prev, password: undefined, general: undefined }))
                   }}
                   placeholder="••••••••"
-                  className={`w-full pl-10 pr-12 py-3 bg-[#555555] rounded-lg text-white placeholder:text-white/40 outline-none transition-all ${
+                  className={`login-input w-full pl-10 pr-12 py-3 rounded-lg outline-none transition-all appearance-none ${
                     errors.password
                       ? "border-2 border-red-400 focus:border-red-400"
                       : "border border-[#888888]/30 focus:border-[#66C1C6]"
                   }`}
+                  style={{ backgroundColor: "#555555", color: "#ffffff", colorScheme: "dark" }}
                 />
                 <button
                   type="button"
