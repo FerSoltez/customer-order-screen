@@ -35,7 +35,7 @@ export default function RootLayout({
   return (
     <html lang="es">
       <head>
-        <link rel="icon" href="/android-chrome-192x192.png" type="image/png" sizes="192x192" />
+        <link rel="icon" href="/Icono%20Pesta%C3%B1a.png" type="image/png" />
       </head>
       <body className={`font-sans antialiased ${chakraPetch.variable} ${montserrat.variable}`}>
         {children}

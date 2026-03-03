@@ -67,9 +67,19 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#000000] flex items-center justify-center p-4">
-      {/* Background gradient */}
-      <div className="absolute inset-0 bg-gradient-to-br from-[#4C2C84]/30 via-[#000000] to-[#1a1a2e] pointer-events-none" />
+    <div className="min-h-screen bg-[#000000] flex items-center justify-center p-4 overflow-hidden">
+      {/* Ambient light effects */}
+      <div className="absolute inset-0 pointer-events-none overflow-hidden">
+        {/* Top-left pink glow */}
+        <div className="absolute -top-32 -left-32 w-[500px] h-[500px] rounded-full bg-[#E71D73]/20 blur-[120px] animate-pulse" />
+        {/* Bottom-right cyan glow */}
+        <div className="absolute -bottom-40 -right-32 w-[500px] h-[500px] rounded-full bg-[#66C1C6]/20 blur-[120px] animate-pulse [animation-delay:1s]" />
+        {/* Center purple glow */}
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] rounded-full bg-[#6122A9]/15 blur-[140px]" />
+        {/* Extra subtle accents */}
+        <div className="absolute top-1/4 right-1/4 w-[300px] h-[300px] rounded-full bg-[#E71D73]/10 blur-[100px] animate-pulse [animation-delay:2s]" />
+        <div className="absolute bottom-1/4 left-1/3 w-[350px] h-[350px] rounded-full bg-[#66C1C6]/10 blur-[100px] animate-pulse [animation-delay:0.5s]" />
+      </div>
 
       <div className="relative w-full max-w-md">
         {/* Logo */}
