@@ -1,11 +1,13 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Search, FileImage, FileText, Eye, CheckCircle, Clock, Trash2, X, Bell, Download, Pencil } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { Search, FileImage, FileText, Eye, CheckCircle, Clock, Trash2, X, Bell, Download, Pencil, LogOut } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { io } from "socket.io-client"
+import { isAuthenticated, authHeaders, handle401, clearAuth, getUser } from "@/lib/auth"
 
 const API_URL = "https://api-darklion.onrender.com"
 
@@ -83,6 +85,8 @@ function mapApiOrder(apiOrder: ApiOrder): Order {
 }
 
 export default function OrdersPage() {
+  const router = useRouter()
+  const [authChecked, setAuthChecked] = useState(false)
   const [searchTerm, setSearchTerm] = useState("")
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
   const [orders, setOrders] = useState<Order[]>([])
@@ -101,6 +105,20 @@ export default function OrdersPage() {
   const [showNotifPanel, setShowNotifPanel] = useState(false)
 
   const unreadCount = notifications.filter((n) => !n.read).length
+
+  // Auth guard: redirect to login if not authenticated
+  useEffect(() => {
+    if (!isAuthenticated()) {
+      router.replace("/login")
+    } else {
+      setAuthChecked(true)
+    }
+  }, [])
+
+  const handleLogout = () => {
+    clearAuth()
+    router.replace("/login")
+  }
 
   const addNotification = (title: string, body: string) => {
     setNotifications((prev) => [
@@ -130,7 +148,10 @@ export default function OrdersPage() {
   const subscribeToPush = async () => {
     try {
       const registration = await navigator.serviceWorker.register("/sw.js")
-      const res = await fetch(`${API_URL}/api/push/vapid-public-key`)
+      const res = await fetch(`${API_URL}/api/push/vapid-public-key`, {
+        headers: authHeaders(),
+      })
+      if (handle401(res)) return
       const { publicKey } = await res.json()
       const subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
@@ -138,7 +159,7 @@ export default function OrdersPage() {
       })
       await fetch(`${API_URL}/api/push/subscribe`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify(subscription),
       })
       console.log("Push notifications: suscrito correctamente")
@@ -186,7 +207,9 @@ export default function OrdersPage() {
         try {
           const res = await fetch(`${API_URL}/api/designs/orders`, {
             method: "GET",
+            headers: authHeaders(),
           })
+          if (handle401(res)) return
           if (!res.ok) throw new Error(`HTTP ${res.status}`)
           const data: ApiOrder[] = await res.json()
           if (!cancelled) {
@@ -296,9 +319,10 @@ export default function OrdersPage() {
       try {
         const res = await fetch(url, {
           method: "PATCH",
-          headers: { "Content-Type": "application/json" },
+          headers: authHeaders({ "Content-Type": "application/json" }),
           body: JSON.stringify(data),
         })
+        if (handle401(res)) return null
         if (res.status === 404) {
           console.warn(`404 en ${url}, probando siguiente...`)
           continue
@@ -422,7 +446,9 @@ export default function OrdersPage() {
       try {
         const res = await fetch(`${API_URL}/api/designs/${orderToDelete.id_design}`, {
           method: "DELETE",
+          headers: authHeaders(),
         })
+        if (handle401(res)) return
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         setOrders((prev) => prev.filter((o) => o.id_design !== orderToDelete.id_design))
         if (selectedOrder?.id_design === orderToDelete.id_design) {
@@ -442,6 +468,14 @@ export default function OrdersPage() {
     setStatusFilter((prev) => (prev === status ? "all" : status))
   }
 
+  if (!authChecked) {
+    return (
+      <div className="min-h-screen bg-[#000000] flex items-center justify-center">
+        <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-white border-t-transparent" />
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-[#000000]">
       {/* Header */}
@@ -459,6 +493,16 @@ export default function OrdersPage() {
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
+
+          {/* Logout button */}
+          <button
+            onClick={handleLogout}
+            className="flex items-center gap-2 text-white/80 hover:text-white transition-colors flex-shrink-0"
+            title="Cerrar sesión"
+          >
+            <LogOut className="h-5 w-5" />
+            <span className="hidden sm:inline text-sm font-medium">{getUser()?.name || "Salir"}</span>
+          </button>
 
           {/* Bell icon */}
           <div className="relative flex-shrink-0">
