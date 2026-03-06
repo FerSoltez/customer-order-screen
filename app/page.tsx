@@ -583,7 +583,7 @@ export default function OrdersPage() {
       <main className="p-4 md:p-8 max-w-7xl mx-auto">
         {/* Title */}
         <h1 className="text-2xl md:text-4xl font-black text-white mb-6 text-center uppercase tracking-wide font-[family-name:var(--font-chakra-petch)]">
-          Gestion de Pedidos Personalizados
+          Gestión de Pedidos Personalizados
         </h1>
 
         {/* Status Cards */}
