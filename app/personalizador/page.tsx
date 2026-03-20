@@ -9,6 +9,8 @@ import { FabricEditor } from "@/components/ui/fabric-editor"
 import { TemplateSelector, type TemplateView } from "@/components/ui/template-selector"
 import { AlertDialog, AlertDialogContent, AlertDialogDescription, AlertDialogHeader, AlertDialogTitle, AlertDialogAction, AlertDialogCancel } from "@/components/ui/alert-dialog"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { AlertTriangle } from "lucide-react"
+import Image from "next/image"
 
 const TShirtPreview3D = dynamic(
   () => import("@/components/ui/tshirt-preview-3d").then((mod) => ({ default: mod.TShirtPreview3D })),
@@ -414,8 +416,15 @@ export default function PersonalizadorPage() {
             <div className="absolute top-2 right-2 z-10">
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <button className="p-2 rounded-full hover:bg-black/20 transition-colors" tabIndex={-1}>
-                    <div className="text-sm">ℹ️</div>
+                  <button className="p-1 rounded-full hover:bg-black/10 transition-colors" tabIndex={-1}>
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white">
+                      <Image
+                        src="/images/icon-rotate.png"
+                        alt="Información del modelo 3D"
+                        width={20}
+                        height={20}
+                      />
+                    </div>
                   </button>
                 </TooltipTrigger>
                 <TooltipContent>
@@ -468,10 +477,8 @@ export default function PersonalizadorPage() {
       <AlertDialog open={showResetConfirm} onOpenChange={setShowResetConfirm}>
         <AlertDialogContent className="max-w-sm">
           <div className="flex flex-col items-center text-center">
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-red-100 mb-4">
-              <svg className="h-6 w-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4v2m0 4v2m0-14a9 9 0 110 18 9 9 0 010-18z" />
-              </svg>
+            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-red-100 mb-4">
+              <AlertTriangle className="h-8 w-8 text-red-600" />
             </div>
             <AlertDialogHeader className="text-center">
               <AlertDialogTitle className="text-xl font-bold text-foreground">¿Deseas resetear tu diseño?</AlertDialogTitle>
