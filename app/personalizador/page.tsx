@@ -10,7 +10,7 @@ import { TemplateSelector, type TemplateView } from "@/components/ui/template-se
 import { AlertDialog, AlertDialogContent, AlertDialogDescription, AlertDialogHeader, AlertDialogTitle, AlertDialogAction, AlertDialogCancel } from "@/components/ui/alert-dialog"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { AlertTriangle } from "lucide-react"
-import Image from "next/image"
+import NextImage from "next/image"
 
 const TShirtPreview3D = dynamic(
   () => import("@/components/ui/tshirt-preview-3d").then((mod) => ({ default: mod.TShirtPreview3D })),
@@ -197,7 +197,7 @@ export default function PersonalizadorPage() {
 
     if (currentId !== composeIdRef.current) return
     setCanvasDataUrl(cvs.toDataURL("image/png"))
-  }, [])
+  }, [activeView])
 
   const handleCanvasUpdate = useCallback(
     (view: string, userContentDataUrl: string) => {
@@ -226,6 +226,13 @@ export default function PersonalizadorPage() {
     // Recompose texture whenever colors change for real-time feedback
     composeUVTexture()
   }, [partColors, composeUVTexture])
+
+  useEffect(() => {
+    if (!isPersistenceReady) return
+    
+    // Generate initial texture after persistence is ready
+    composeUVTexture()
+  }, [isPersistenceReady, composeUVTexture])
 
   useEffect(() => {
     if (!isPersistenceReady) return
@@ -418,7 +425,7 @@ export default function PersonalizadorPage() {
                 <TooltipTrigger asChild>
                   <button className="p-1 rounded-full hover:bg-black/10 transition-colors" tabIndex={-1}>
                     <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white">
-                      <Image
+                      <NextImage
                         src="/images/icon-rotate.png"
                         alt="Información del modelo 3D"
                         width={20}

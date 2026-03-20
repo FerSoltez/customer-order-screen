@@ -117,10 +117,7 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
     try {
       const cw = canvas.width
       const ch = canvas.height
-      // Higher base multiplier for better quality, capped at 5 to avoid artifacts
-      const multiplier = Math.min(5, Math.max(3, Math.ceil(2048 / Math.max(cw, ch))))
-      const outW = Math.round(cw * multiplier)
-      const outH = Math.round(ch * multiplier)
+      if (!cw || !ch) return null
 
       // Temporarily hide background/zones to get user-only content
       const origBg = canvas.backgroundColor
@@ -139,8 +136,26 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
       })
       canvas.renderAll()
 
-      // Get high-res canvas element with user content (synchronous)
-      const userCanvas = canvas.toCanvasElement(multiplier)
+      // Get canvas element with user content
+      let userCanvas: HTMLCanvasElement
+      try {
+        userCanvas = canvas.toCanvasElement?.() || canvas.getElement?.() || canvas.lowerCanvasEl
+        if (!userCanvas) {
+          // Fallback: create a new canvas and render to it
+          userCanvas = document.createElement("canvas")
+          userCanvas.width = cw
+          userCanvas.height = ch
+          const ctx = userCanvas.getContext("2d")
+          if (ctx) {
+            const imageData = canvas.getImageData?.()
+            if (imageData) {
+              ctx.putImageData(imageData, 0, 0)
+            }
+          }
+        }
+      } catch (e) {
+        userCanvas = canvas.lowerCanvasEl
+      }
 
       // Restore original canvas state
       canvas.backgroundColor = origBg
@@ -155,30 +170,38 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
 
       // Create offscreen canvas with transparent background
       const offscreen = document.createElement("canvas")
-      offscreen.width = outW
-      offscreen.height = outH
+      offscreen.width = cw
+      offscreen.height = ch
       const ctx = offscreen.getContext("2d", { alpha: true })
-      if (!ctx) return userCanvas.toDataURL("image/png")
+      if (!ctx) {
+        // Fallback: return user canvas directly if we can't clip to zones
+        try {
+          return userCanvas.toDataURL("image/png")
+        } catch {
+          return null
+        }
+      }
 
       // Clear with full transparency
-      ctx.clearRect(0, 0, outW, outH)
+      ctx.clearRect(0, 0, cw, ch)
 
       // Draw only the zone regions (no clip artifacts)
       if (zones.length > 0) {
         for (const z of zones) {
-          const sx = z.x * outW
-          const sy = z.y * outH
-          const sw = z.w * outW
-          const sh = z.h * outH
+          const sx = z.x * cw
+          const sy = z.y * ch
+          const sw = z.w * cw
+          const sh = z.h * ch
           ctx.drawImage(userCanvas, sx, sy, sw, sh, sx, sy, sw, sh)
         }
       } else {
         // If no zones, draw entire user canvas
-        ctx.drawImage(userCanvas, 0, 0, outW, outH)
+        ctx.drawImage(userCanvas, 0, 0, cw, ch)
       }
 
       return offscreen.toDataURL("image/png")
-    } catch {
+    } catch (e) {
+      console.error("exportUserContent failed:", e)
       return null
     }
   }, [activeView])
