@@ -75,6 +75,8 @@ export default function PersonalizadorPage() {
   const [isPersistenceReady, setIsPersistenceReady] = useState(false)
   const [persistTick, setPersistTick] = useState(0)
   const [showResetConfirm, setShowResetConfirm] = useState(false)
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false)
+  const [showSaveConfirm, setShowSaveConfirm] = useState(false)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fabricCanvasRef = useRef<any>(null)
   const viewContentRef = useRef<Record<string, string>>({})
@@ -411,7 +413,7 @@ export default function PersonalizadorPage() {
 
           {/* Template selector buttons - below canvas */}
           <div className="border-t border-border/40 bg-card/60 px-3 py-3 backdrop-blur-sm">
-            <TemplateSelector activeView={activeView} onViewChange={setActiveView} onReset={() => setShowResetConfirm(true)} />
+            <TemplateSelector activeView={activeView} onViewChange={setActiveView} />
           </div>
         </div>
 
@@ -435,7 +437,7 @@ export default function PersonalizadorPage() {
                   </button>
                 </TooltipTrigger>
                 <TooltipContent>
-                  💡 Este es un modelo 3D interactivo. Usa el ratón para rotar y zoom.
+                  Este es un modelo 3D interactivo. Usa el ratón para rotar y zoom.
                 </TooltipContent>
               </Tooltip>
             </div>
@@ -469,10 +471,24 @@ export default function PersonalizadorPage() {
           {/* Action buttons */}
           <div className="border-t border-border/40 p-4">
             <div className="flex flex-col gap-2">
-              <button className="w-full rounded-lg bg-purple-200 hover:bg-purple-300 py-3 text-base font-bold tracking-wide text-gray-900 transition-colors">
-                Cancelar
-              </button>
-              <button className="w-full rounded-lg bg-purple-600 hover:bg-purple-700 py-3 text-base font-bold tracking-wide text-white transition-colors">
+              <div className="flex gap-2">
+                <button 
+                  onClick={() => setShowResetConfirm(true)}
+                  className="flex-1 rounded-lg bg-purple-200 hover:bg-purple-300 py-3 text-base font-bold tracking-wide text-gray-900 transition-colors"
+                >
+                  Resetear
+                </button>
+                <button 
+                  onClick={() => setShowCancelConfirm(true)}
+                  className="flex-1 rounded-lg bg-purple-200 hover:bg-purple-300 py-3 text-base font-bold tracking-wide text-gray-900 transition-colors"
+                >
+                  Cancelar
+                </button>
+              </div>
+              <button 
+                onClick={() => setShowSaveConfirm(true)}
+                className="w-full rounded-lg bg-purple-600 hover:bg-purple-700 py-3 text-base font-bold tracking-wide text-white transition-colors"
+              >
                 Guardar
               </button>
             </div>
@@ -503,6 +519,70 @@ export default function PersonalizadorPage() {
             </AlertDialogAction>
             <AlertDialogCancel className="text-gray-600 hover:text-gray-700 rounded-lg py-2.5 font-semibold border-0">
               Cancelar
+            </AlertDialogCancel>
+          </div>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Cancel Confirmation Dialog */}
+      <AlertDialog open={showCancelConfirm} onOpenChange={setShowCancelConfirm}>
+        <AlertDialogContent className="max-w-sm">
+          <div className="flex flex-col items-center text-center">
+            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-orange-100 mb-4">
+              <AlertTriangle className="h-8 w-8 text-orange-600" />
+            </div>
+            <AlertDialogHeader className="text-center">
+              <AlertDialogTitle className="text-xl font-bold text-foreground">¿Deseas cancelar sin guardar?</AlertDialogTitle>
+              <AlertDialogDescription className="mt-2 text-sm text-muted-foreground">
+                Los cambios que hayas realizado en esta sesión <span className="font-semibold text-foreground">no serán guardados</span>.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+          </div>
+          <div className="flex flex-col gap-2 sm:gap-3 mt-6">
+            <AlertDialogAction 
+              onClick={() => {
+                setShowCancelConfirm(false)
+                // Aquí puedes agregar la lógica para volver atrás
+              }}
+              className="bg-orange-600 hover:bg-orange-700 text-white rounded-lg py-2.5 font-semibold"
+            >
+              Cancelar Sin Guardar
+            </AlertDialogAction>
+            <AlertDialogCancel className="text-gray-600 hover:text-gray-700 rounded-lg py-2.5 font-semibold border-0">
+              Volver al Editor
+            </AlertDialogCancel>
+          </div>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Save Confirmation Dialog */}
+      <AlertDialog open={showSaveConfirm} onOpenChange={setShowSaveConfirm}>
+        <AlertDialogContent className="max-w-sm">
+          <div className="flex flex-col items-center text-center">
+            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-green-100 mb-4">
+              <svg className="h-8 w-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <AlertDialogHeader className="text-center">
+              <AlertDialogTitle className="text-xl font-bold text-foreground">¿Guardar los cambios?</AlertDialogTitle>
+              <AlertDialogDescription className="mt-2 text-sm text-muted-foreground">
+                Se guardarán todos los cambios que has realizado en tu diseño personalizado.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+          </div>
+          <div className="flex flex-col gap-2 sm:gap-3 mt-6">
+            <AlertDialogAction 
+              onClick={() => {
+                setShowSaveConfirm(false)
+                // Aquí puedes agregar la lógica para guardar
+              }}
+              className="bg-green-600 hover:bg-green-700 text-white rounded-lg py-2.5 font-semibold"
+            >
+              Guardar Cambios
+            </AlertDialogAction>
+            <AlertDialogCancel className="text-gray-600 hover:text-gray-700 rounded-lg py-2.5 font-semibold border-0">
+              Continuar Editando
             </AlertDialogCancel>
           </div>
         </AlertDialogContent>

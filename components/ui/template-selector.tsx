@@ -1,14 +1,12 @@
 "use client"
 
 import Image from "next/image"
-import { RotateCcw } from "lucide-react"
 
 export type TemplateView = "frente" | "espalda" | "mangas"
 
 interface TemplateSelectorProps {
   activeView: TemplateView
   onViewChange: (view: TemplateView) => void
-  onReset?: () => void
 }
 
 const templates: { id: TemplateView; label: string; image: string }[] = [
@@ -17,10 +15,10 @@ const templates: { id: TemplateView; label: string; image: string }[] = [
   { id: "mangas", label: "MANGAS", image: "/images/mangas.png" },
 ]
 
-export function TemplateSelector({ activeView, onViewChange, onReset }: TemplateSelectorProps) {
+export function TemplateSelector({ activeView, onViewChange }: TemplateSelectorProps) {
   return (
-    <div className="flex items-center justify-between">
-      <div className="flex items-center justify-center gap-4 flex-1">
+    <div className="flex items-center justify-end gap-6" style={{ marginRight: "0px" }}>
+      <div className="flex items-center gap-4" style={{ marginRight: "290px" }}>
         {templates.map((template) => (
           <button
             key={template.id}
@@ -45,17 +43,6 @@ export function TemplateSelector({ activeView, onViewChange, onReset }: Template
           </button>
         ))}
       </div>
-
-      {/* Reset button - compact */}
-      {onReset && (
-        <button
-          onClick={onReset}
-          className="ml-2 flex items-center justify-center px-3 py-2 rounded-lg border border-purple-600/30 bg-purple-600/10 hover:bg-purple-600/20 transition-colors"
-          title="Resetear diseño"
-        >
-          <RotateCcw className="h-4 w-4 text-purple-600" />
-        </button>
-      )}
     </div>
   )
 }
