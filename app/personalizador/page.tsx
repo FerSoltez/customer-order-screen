@@ -476,7 +476,7 @@ export default function PersonalizadorPage() {
                   onClick={() => setShowResetConfirm(true)}
                   className="flex-1 rounded-lg bg-purple-200 hover:bg-purple-300 py-3 text-base font-bold tracking-wide text-gray-900 transition-colors"
                 >
-                  Resetear
+                  Deshacer todo
                 </button>
                 <button 
                   onClick={() => setShowCancelConfirm(true)}
