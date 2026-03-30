@@ -119,10 +119,10 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
       const ch = canvas.height
       if (!cw || !ch) return null
 
-      // Temporarily hide background/zones to get user-only content
+      // Temporarily hide background/zones to get user-only content with transparency
       const origBg = canvas.backgroundColor
       const origBgImage = canvas.backgroundImage
-      canvas.backgroundColor = "rgba(0,0,0,0)"
+      canvas.backgroundColor = null
       canvas.backgroundImage = null
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -136,7 +136,7 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
       })
       canvas.renderAll()
 
-      // Get canvas element with user content
+      // Get canvas element with user content (now without background)
       let userCanvas: HTMLCanvasElement
       try {
         userCanvas = canvas.toCanvasElement?.() || canvas.getElement?.() || canvas.lowerCanvasEl
@@ -172,7 +172,7 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
       const offscreen = document.createElement("canvas")
       offscreen.width = cw
       offscreen.height = ch
-      const ctx = offscreen.getContext("2d", { alpha: true })
+      const ctx = offscreen.getContext("2d", { alpha: true, willReadFrequently: true })
       if (!ctx) {
         // Fallback: return user canvas directly if we can't clip to zones
         try {
@@ -199,7 +199,10 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
         ctx.drawImage(userCanvas, 0, 0, cw, ch)
       }
 
-      return offscreen.toDataURL("image/png")
+      // Export to PNG with preserved transparency
+      // Using canvas.toDataURL with proper PNG handling to avoid white background
+      const pngData = offscreen.toDataURL("image/png")
+      return pngData
     } catch (e) {
       console.error("exportUserContent failed:", e)
       return null
@@ -264,7 +267,7 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
       const canvas = new fabric.Canvas(canvasEl, {
         width: canvasWidth,
         height: canvasHeight,
-        backgroundColor: "#ffffff",
+        backgroundColor: "rgba(0,0,0,0)",
         selection: true,
       })
       canvasInstanceMapRef.current.set(canvasEl, canvas)
@@ -408,6 +411,82 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
         imgElement.src = imgUrl
       })
 
+      type PixelZone = { left: number; top: number; width: number; height: number }
+      const zonesPx: PixelZone[] = (zoneConfigs[viewKey] || []).map((z) => ({
+        left: z.x * canvasWidth,
+        top: z.y * canvasHeight,
+        width: z.w * canvasWidth,
+        height: z.h * canvasHeight,
+      }))
+
+      const pickZoneForObject = (obj: any): PixelZone | null => {
+        if (zonesPx.length === 0) return null
+        const center = obj.getCenterPoint?.()
+        if (!center) return zonesPx[0]
+
+        for (const z of zonesPx) {
+          const insideX = center.x >= z.left && center.x <= z.left + z.width
+          const insideY = center.y >= z.top && center.y <= z.top + z.height
+          if (insideX && insideY) return z
+        }
+
+        let best = zonesPx[0]
+        let bestDist = Number.POSITIVE_INFINITY
+        zonesPx.forEach((z) => {
+          const zx = z.left + z.width / 2
+          const zy = z.top + z.height / 2
+          const d = (center.x - zx) ** 2 + (center.y - zy) ** 2
+          if (d < bestDist) {
+            bestDist = d
+            best = z
+          }
+        })
+        return best
+      }
+
+      const clampObjectInsideZones = (obj: any) => {
+        if (!obj || obj._isZone || obj.type === "activeSelection") return
+        const targetZone = pickZoneForObject(obj)
+        if (!targetZone) return
+
+        const margin = 1
+        const maxW = Math.max(1, targetZone.width - margin * 2)
+        const maxH = Math.max(1, targetZone.height - margin * 2)
+
+        obj.setCoords()
+        let bounds = obj.getBoundingRect(true, true)
+        if (!bounds) return
+
+        if (bounds.width > maxW || bounds.height > maxH) {
+          const fit = Math.min(maxW / Math.max(1, bounds.width), maxH / Math.max(1, bounds.height))
+          obj.scaleX = (obj.scaleX || 1) * fit
+          obj.scaleY = (obj.scaleY || 1) * fit
+          obj.setCoords()
+          bounds = obj.getBoundingRect(true, true)
+        }
+
+        let dx = 0
+        let dy = 0
+
+        if (bounds.left < targetZone.left + margin) {
+          dx = targetZone.left + margin - bounds.left
+        } else if (bounds.left + bounds.width > targetZone.left + targetZone.width - margin) {
+          dx = (targetZone.left + targetZone.width - margin) - (bounds.left + bounds.width)
+        }
+
+        if (bounds.top < targetZone.top + margin) {
+          dy = targetZone.top + margin - bounds.top
+        } else if (bounds.top + bounds.height > targetZone.top + targetZone.height - margin) {
+          dy = (targetZone.top + targetZone.height - margin) - (bounds.top + bounds.height)
+        }
+
+        if (dx !== 0 || dy !== 0) {
+          obj.left = (obj.left || 0) + dx
+          obj.top = (obj.top || 0) + dy
+          obj.setCoords()
+        }
+      }
+
       // Auto-fit newly added objects into the first zone
       canvas.on("object:added", (e: { target?: any }) => {
         if (isLoadingRef.current) return
@@ -439,10 +518,116 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
         })
         obj._autoFitted = true
         obj.setCoords()
+        clampObjectInsideZones(obj)
       })
+
+      canvas.on("object:moving", (e: { target?: any }) => {
+        const obj = e.target
+        if (!obj || obj._isZone) return
+        clampObjectInsideZones(obj)
+      })
+
+      canvas.on("object:scaling", (e: { target?: any }) => {
+        const obj = e.target
+        if (!obj || obj._isZone) return
+        clampObjectInsideZones(obj)
+      })
+
+      canvas.on("object:rotating", (e: { target?: any }) => {
+        const obj = e.target
+        if (!obj || obj._isZone) return
+        clampObjectInsideZones(obj)
+      })
+
+      const pasteFromClipboard = async () => {
+        if (!navigator.clipboard) return
+
+        try {
+          // Prefer image blobs when available
+          if ("read" in navigator.clipboard) {
+            const items = await (navigator.clipboard as Clipboard).read()
+            for (const item of items) {
+              const imageType = item.types.find((t) => t.startsWith("image/"))
+              if (!imageType) continue
+
+              const blob = await item.getType(imageType)
+              const dataUrl = await new Promise<string>((resolve, reject) => {
+                const reader = new FileReader()
+                reader.onload = () => resolve(reader.result as string)
+                reader.onerror = () => reject(new Error("No se pudo leer la imagen pegada"))
+                reader.readAsDataURL(blob)
+              })
+
+              const imgEl = document.createElement("img")
+              imgEl.crossOrigin = "anonymous"
+              await new Promise<void>((resolve) => {
+                imgEl.onload = () => resolve()
+                imgEl.onerror = () => resolve()
+                imgEl.src = dataUrl
+              })
+
+              if (imgEl.naturalWidth > 0 && imgEl.naturalHeight > 0) {
+                const z = zonesPx[0]
+                const maxW = z ? z.width * 0.85 : canvasWidth * 0.4
+                const maxH = z ? z.height * 0.85 : canvasHeight * 0.4
+                const scale = Math.min(maxW / imgEl.naturalWidth, maxH / imgEl.naturalHeight, 1)
+
+                const imageObj = new fabric.FabricImage(imgEl, {
+                  left: z ? z.left + z.width / 2 : canvasWidth / 2,
+                  top: z ? z.top + z.height / 2 : canvasHeight / 2,
+                  originX: "center",
+                  originY: "center",
+                  scaleX: scale,
+                  scaleY: scale,
+                })
+                canvas.add(imageObj)
+                canvas.setActiveObject(imageObj)
+                clampObjectInsideZones(imageObj)
+                canvas.requestRenderAll()
+                return
+              }
+            }
+          }
+        } catch {
+          // Keep going and try text fallback
+        }
+
+        try {
+          const text = await navigator.clipboard.readText()
+          if (!text?.trim()) return
+          const txt = new fabric.IText(text.trim(), {
+            left: canvasWidth / 2,
+            top: canvasHeight / 2,
+            originX: "center",
+            originY: "center",
+            fontSize: 28,
+            fill: "#1a1a2e",
+            fontFamily: "Inter, sans-serif",
+          })
+          canvas.add(txt)
+          canvas.setActiveObject(txt)
+          clampObjectInsideZones(txt)
+          canvas.requestRenderAll()
+        } catch {
+          // ignore clipboard read errors
+        }
+      }
 
       // Delete selected object with Delete/Backspace
       const handleKeyDown = (e: KeyboardEvent) => {
+        const target = e.target as HTMLElement | null
+        const isTypingTarget = !!target && (
+          target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable
+        )
+
+        if (!isTypingTarget && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") {
+          e.preventDefault()
+          void pasteFromClipboard()
+          return
+        }
+
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const active = canvas.getActiveObject() as any
         if (!active) return
@@ -536,7 +721,7 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
     } else {
       // Single canvas for frente/espalda - large
       const aspect = 0.65
-      let canvasWidth = Math.min(containerWidth - 16, 700)
+      let canvasWidth = Math.min(containerWidth - 16, 1200)
       let canvasHeight = canvasWidth / aspect
 
       if (canvasHeight > containerHeight - 16) {

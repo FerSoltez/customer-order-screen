@@ -13,7 +13,7 @@ interface TShirtModelProps {
 
 function TShirtModel({ bodyColor, textureUrl, onReady }: TShirtModelProps) {
   const groupRef = useRef<THREE.Group>(null!)
-  const { scene } = useGLTF("/models/camiseta.glb")
+  const { scene } = useGLTF("/models/CamisaCuelloRedondo.glb")
 
   // Clone the scene so we can safely modify materials without side-effects
   const clonedScene = useMemo(() => {
@@ -32,10 +32,10 @@ function TShirtModel({ bodyColor, textureUrl, onReady }: TShirtModelProps) {
     tex.colorSpace = THREE.SRGBColorSpace
     tex.wrapS = THREE.ClampToEdgeWrapping
     tex.wrapT = THREE.ClampToEdgeWrapping
-    tex.generateMipmaps = false
-    tex.minFilter = THREE.LinearFilter
+    tex.generateMipmaps = true
+    tex.minFilter = THREE.LinearMipmapLinearFilter
     tex.magFilter = THREE.LinearFilter
-    tex.anisotropy = 8
+    tex.anisotropy = 16
     return tex
   }, [textureUrl])
 
@@ -65,7 +65,7 @@ function TShirtModel({ bodyColor, textureUrl, onReady }: TShirtModelProps) {
   )
 }
 
-useGLTF.preload("/models/camiseta.glb")
+useGLTF.preload("/models/CamisaCuelloRedondo.glb")
 
 function LoadingFallback() {
   return (
@@ -98,13 +98,13 @@ export function TShirtPreview3D({ bodyColor, textureUrl }: TShirtPreview3DProps)
         </div>
       )}
       <Canvas
-        camera={{ position: [0, 0, 4], fov: 45 }}
+        camera={{ position: [0, 0, 0.7], fov: 55 }}
         gl={{ preserveDrawingBuffer: true, antialias: true, logarithmicDepthBuffer: true }}
       >
         <color attach="background" args={[bodyColor]} />
-        <ambientLight intensity={0.6} />
-        <directionalLight position={[5, 5, 5]} intensity={0.8} />
-        <directionalLight position={[-3, 3, -3]} intensity={0.3} />
+        <ambientLight intensity={0.3} />
+        <directionalLight position={[5, 5, 5]} intensity={0.5} />
+        <directionalLight position={[-3, 3, -3]} intensity={0.15} />
         <Suspense fallback={<LoadingFallback />}>
           <TShirtModel bodyColor={bodyColor} textureUrl={textureUrl} onReady={handleModelReady} />
           <Environment preset="studio" />
@@ -112,8 +112,8 @@ export function TShirtPreview3D({ bodyColor, textureUrl }: TShirtPreview3DProps)
         <OrbitControls
           enablePan={false}
           enableZoom={true}
-          minDistance={2}
-          maxDistance={6}
+          minDistance={0.5}
+          maxDistance={1}
           minPolarAngle={Math.PI / 4}
           maxPolarAngle={Math.PI / 1.5}
         />

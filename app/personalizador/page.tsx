@@ -36,18 +36,24 @@ interface UploadedImage {
 
 // UV positions on the composite texture (normalized 0-1, from Blender UV map)
 const UV_REGIONS: Record<string, { x: number; y: number; w: number; h: number }> = {
-  frente:          { x: 0.038, y: 0.060, w: 0.453, h: 0.610 },
-  espalda:         { x: 0.510, y: 0.060, w: 0.453, h: 0.610 },
-  manga_izquierda: { x: 0.490, y: 0.720, w: 0.320, h: 0.170 },
-  manga_derecha:   { x: 0.015, y: 0.720, w: 0.320, h: 0.170 },
+  frente:          { x: 0.0000, y: 0.1172, w: 0.5000, h: 0.7227 },
+  espalda:         { x: 0.50, y: 0.1172, w: 0.4500, h: 0.7227 },
+  manga_izquierda: { x: 0.000, y: 0.8008, w: 0.50, h: 0.1992 },
+  manga_derecha:   { x: 0.50, y: 0.8008, w: 0.60, h: 0.1992 },
 }
-const TEXTURE_SIZE = 2048
+
+const NECK_REGIONS = {
+  neck_front: { x: 0.100, y: 0.0586, w: 0.5044, h: 0.0195 },
+  neck_back:  { x: 0.6250, y: 0.0586, w: 0.2344, h: 0.0195 },
+}
+const TEXTURE_SIZE = 8192
 
 interface PartColors {
   frente: string
   espalda: string
   manga_izquierda: string
   manga_derecha: string
+  cuello: string
 }
 
 interface PersistedPersonalizadorState {
@@ -63,6 +69,7 @@ const DEFAULT_PART_COLORS: PartColors = {
   espalda: "#ffffff",
   manga_izquierda: "#ffffff",
   manga_derecha: "#ffffff",
+  cuello: "#ffffff",
 }
 
 export default function PersonalizadorPage() {
@@ -161,6 +168,21 @@ export default function PersonalizadorPage() {
         right - left,
         bottom - top
       )
+    })
+
+    // Neck front/back share one color control (cuello)
+    const neckColor = partColorsRef.current.cuello ?? "#ffffff"
+    ctx.fillStyle = neckColor
+    Object.values(NECK_REGIONS).forEach((region) => {
+      const px = region.x * TEXTURE_SIZE
+      const py = region.y * TEXTURE_SIZE
+      const pw = region.w * TEXTURE_SIZE
+      const ph = region.h * TEXTURE_SIZE
+      const left = Math.max(0, px - regionPadding)
+      const top = Math.max(0, py - regionPadding)
+      const right = Math.min(TEXTURE_SIZE, px + pw + regionPadding)
+      const bottom = Math.min(TEXTURE_SIZE, py + ph + regionPadding)
+      ctx.fillRect(left, top, right - left, bottom - top)
     })
 
     // Load all per-view images

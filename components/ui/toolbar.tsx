@@ -21,8 +21,9 @@ interface ToolbarProps {
     espalda: string
     manga_izquierda: string
     manga_derecha: string
+    cuello: string
   }
-  onPartColorChange: (part: "frente" | "espalda" | "manga_izquierda" | "manga_derecha", color: string) => void
+  onPartColorChange: (part: "frente" | "espalda" | "manga_izquierda" | "manga_derecha" | "cuello", color: string) => void
 }
 
 const FONT_OPTIONS = [
@@ -327,6 +328,22 @@ export function Toolbar({ onImageUpload, onAddText, onUpdateSelectedTextStyle, o
                       />
                     </label>
                     <span className="text-[11px] text-muted-foreground">{partColors.manga_derecha}</span>
+                  </div>
+                </label>
+
+                <label className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2 text-xs font-medium text-foreground">
+                  Cuello
+                  <div className="flex items-center gap-2">
+                    <label className="relative flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-full border-2 border-border">
+                      <div className="absolute inset-0 rounded-full" style={{ backgroundColor: partColors.cuello }} />
+                      <input
+                        type="color"
+                        value={partColors.cuello}
+                        onChange={(e) => onPartColorChange("cuello", e.target.value)}
+                        className="absolute inset-0 cursor-pointer opacity-0"
+                      />
+                    </label>
+                    <span className="text-[11px] text-muted-foreground">{partColors.cuello}</span>
                   </div>
                 </label>
               </div>
