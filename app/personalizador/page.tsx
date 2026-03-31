@@ -36,17 +36,28 @@ interface UploadedImage {
 
 // UV positions on the composite texture (normalized 0-1, from Blender UV map)
 const UV_REGIONS: Record<string, { x: number; y: number; w: number; h: number }> = {
-  frente:          { x: 0.0000, y: 0.1172, w: 0.5000, h: 0.7227 },
-  espalda:         { x: 0.50, y: 0.1172, w: 0.4500, h: 0.7227 },
-  manga_izquierda: { x: 0.000, y: 0.8008, w: 0.50, h: 0.1992 },
-  manga_derecha:   { x: 0.50, y: 0.8008, w: 0.60, h: 0.1992 },
+  frente:          { x: 0.0000, y: 0.1172, w: 0.50, h: 0.6527 },
+  espalda:         { x: 0.50, y: 0.1172, w: 0.45, h: 0.7227 },
+  manga_izquierda: { x: 0.000, y: 0.8008, w: 0.550, h: 0.15 },
+  manga_derecha:   { x: 0.50, y: 0.8008, w: 0.40, h: 0.1592 },
 }
 
 const NECK_REGIONS = {
   neck_front: { x: 0.100, y: 0.0586, w: 0.5044, h: 0.0195 },
   neck_back:  { x: 0.6250, y: 0.0586, w: 0.2344, h: 0.0195 },
 }
-const TEXTURE_SIZE = 8192
+
+// Manual projection compensation per view.
+// Use values < 1 to reduce final size on the model, > 1 to enlarge it.
+type UVViewKey = keyof typeof UV_REGIONS
+
+const VIEW_CONTENT_SCALE: Partial<Record<UVViewKey, { x: number; y: number }>> = {
+  manga_izquierda: { x: 0.40, y: 1 },
+  manga_derecha: { x: 0.40, y: 1 },
+}
+
+// Ultra-high resolution texture for maximum detail on all surfaces
+const TEXTURE_SIZE = 16384
 
 interface PartColors {
   frente: string
@@ -210,12 +221,21 @@ export default function PersonalizadorPage() {
     for (const { view, img } of loaded) {
       const r = UV_REGIONS[view]
       if (!r) continue
+
+      const scale = VIEW_CONTENT_SCALE[view as UVViewKey] ?? { x: 1, y: 1 }
+      const baseW = r.w * TEXTURE_SIZE
+      const baseH = r.h * TEXTURE_SIZE
+      const drawW = baseW * scale.x
+      const drawH = baseH * scale.y
+      const drawX = r.x * TEXTURE_SIZE + (baseW - drawW) / 2
+      const drawY = r.y * TEXTURE_SIZE + (baseH - drawH) / 2
+
       ctx.drawImage(
         img,
-        r.x * TEXTURE_SIZE,
-        r.y * TEXTURE_SIZE,
-        r.w * TEXTURE_SIZE,
-        r.h * TEXTURE_SIZE
+        drawX,
+        drawY,
+        drawW,
+        drawH
       )
     }
 
@@ -366,6 +386,10 @@ export default function PersonalizadorPage() {
     addImageToCanvas(dataUrl)
   }, [addImageToCanvas])
 
+  const handleRemoveUploadedImage = useCallback((id: string) => {
+    setUploadedImages((prev) => prev.filter((img) => img.id !== id))
+  }, [])
+
   const handleResetAllChanges = useCallback(() => {
     setPartColors({ ...DEFAULT_PART_COLORS })
     setUploadedImages([])
@@ -406,6 +430,7 @@ export default function PersonalizadorPage() {
                 onAddText={handleAddText}
                 onUpdateSelectedTextStyle={handleUpdateSelectedTextStyle}
                 onAddUploadedImage={handleAddUploadedImage}
+                onRemoveUploadedImage={handleRemoveUploadedImage}
                 uploadedImages={uploadedImages}
                 partColors={partColors}
                 onPartColorChange={handlePartColorChange}

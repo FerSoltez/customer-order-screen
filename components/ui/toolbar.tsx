@@ -15,6 +15,7 @@ interface ToolbarProps {
   onAddText: (text: string, fontFamily: string, color: string) => void
   onUpdateSelectedTextStyle: (fontFamily: string, color: string) => boolean
   onAddUploadedImage: (dataUrl: string) => void
+  onRemoveUploadedImage?: (id: string) => void
   uploadedImages: UploadedImage[]
   partColors: {
     frente: string
@@ -37,7 +38,7 @@ const FONT_OPTIONS = [
   { label: "Verdana", value: "Verdana, sans-serif" },
 ]
 
-export function Toolbar({ onImageUpload, onAddText, onUpdateSelectedTextStyle, onAddUploadedImage, uploadedImages, partColors, onPartColorChange }: ToolbarProps) {
+export function Toolbar({ onImageUpload, onAddText, onUpdateSelectedTextStyle, onAddUploadedImage, onRemoveUploadedImage, uploadedImages, partColors, onPartColorChange }: ToolbarProps) {
   const imageInputRef = useRef<HTMLInputElement>(null)
   const [activePanel, setActivePanel] = useState<"subidos" | "texto" | "partes" | null>(null)
   const [textInput, setTextInput] = useState("Tu texto")
@@ -140,22 +141,36 @@ export function Toolbar({ onImageUpload, onAddText, onUpdateSelectedTextStyle, o
               ) : (
                 <div className="grid grid-cols-3 gap-2">
                   {uploadedImages.map((img) => (
-                    <button
+                    <div
                       key={img.id}
-                      onClick={() => {
-                        onAddUploadedImage(img.dataUrl)
-                        setActivePanel(null)
-                      }}
-                      className="group relative aspect-square overflow-hidden rounded-lg border border-border transition-all hover:ring-2 hover:ring-primary"
+                      className="group relative aspect-square overflow-hidden rounded-lg border border-border"
                       title={img.name}
                     >
-                      <Image
-                        src={img.dataUrl}
-                        alt={img.name}
-                        fill
-                        className="object-cover"
-                      />
-                    </button>
+                      <button
+                        onClick={() => {
+                          onAddUploadedImage(img.dataUrl)
+                          setActivePanel(null)
+                        }}
+                        className="absolute inset-0 h-full w-full transition-all hover:ring-2 hover:ring-primary"
+                      >
+                        <Image
+                          src={img.dataUrl}
+                          alt={img.name}
+                          fill
+                          className="object-cover"
+                        />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          onRemoveUploadedImage?.(img.id)
+                        }}
+                        className="absolute right-1 top-1 rounded-full bg-red-500/80 p-1 opacity-0 transition-opacity hover:bg-red-600 group-hover:opacity-100"
+                        title="Eliminar imagen"
+                      >
+                        <X className="h-3 w-3 text-white" />
+                      </button>
+                    </div>
                   ))}
                 </div>
               )}
