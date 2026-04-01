@@ -52,12 +52,13 @@ const NECK_REGIONS = {
 type UVViewKey = keyof typeof UV_REGIONS
 
 const VIEW_CONTENT_SCALE: Partial<Record<UVViewKey, { x: number; y: number }>> = {
-  manga_izquierda: { x: 0.40, y: 1 },
-  manga_derecha: { x: 0.40, y: 1 },
+  manga_izquierda: { x: 0.65, y: 1 },
+  manga_derecha: { x: 0.86, y: 1 },
 }
 
-// Ultra-high resolution texture for maximum detail on all surfaces
-const TEXTURE_SIZE = 16384
+// Optimized texture size for balance between quality and performance
+// 8192 is stable without lag on color/image changes
+const TEXTURE_SIZE = 8192
 
 interface PartColors {
   frente: string
@@ -143,105 +144,115 @@ export default function PersonalizadorPage() {
     fabricCanvasRef.current = canvas
   }, [])
 
-  const composeUVTexture = useCallback(async () => {
-    const currentId = ++composeIdRef.current
+  // Store compose function in ref to avoid dependency issues
+  const composeUVTextureRef = useRef<() => Promise<void>>(async () => {})
 
-    if (!compositeCanvasRef.current) {
-      compositeCanvasRef.current = document.createElement("canvas")
-      compositeCanvasRef.current.width = TEXTURE_SIZE
-      compositeCanvasRef.current.height = TEXTURE_SIZE
+  useEffect(() => {
+    // Only define composeUVTexture logic once on mount or activeView change
+    composeUVTextureRef.current = async () => {
+      const currentId = ++composeIdRef.current
+
+      if (!compositeCanvasRef.current) {
+        compositeCanvasRef.current = document.createElement("canvas")
+        compositeCanvasRef.current.width = TEXTURE_SIZE
+        compositeCanvasRef.current.height = TEXTURE_SIZE
+      }
+
+      const cvs = compositeCanvasRef.current
+      const ctx = cvs.getContext("2d")
+      if (!ctx) return
+
+      // Fill neutral base first
+      ctx.fillStyle = "#ffffff"
+      ctx.fillRect(0, 0, TEXTURE_SIZE, TEXTURE_SIZE)
+
+      // Apply base color by model part with padding to reduce edge seams
+      const regionPadding = 10
+      Object.entries(UV_REGIONS).forEach(([partKey, region]) => {
+        const color = partColorsRef.current[partKey as keyof PartColors] ?? "#ffffff"
+        ctx.fillStyle = color
+        const px = region.x * TEXTURE_SIZE
+        const py = region.y * TEXTURE_SIZE
+        const pw = region.w * TEXTURE_SIZE
+        const ph = region.h * TEXTURE_SIZE
+        const left = Math.max(0, px - regionPadding)
+        const top = Math.max(0, py - regionPadding)
+        const right = Math.min(TEXTURE_SIZE, px + pw + regionPadding)
+        const bottom = Math.min(TEXTURE_SIZE, py + ph + regionPadding)
+        ctx.fillRect(
+          left,
+          top,
+          right - left,
+          bottom - top
+        )
+      })
+
+      // Neck front/back share one color control (cuello)
+      const neckColor = partColorsRef.current.cuello ?? "#ffffff"
+      ctx.fillStyle = neckColor
+      Object.values(NECK_REGIONS).forEach((region) => {
+        const px = region.x * TEXTURE_SIZE
+        const py = region.y * TEXTURE_SIZE
+        const pw = region.w * TEXTURE_SIZE
+        const ph = region.h * TEXTURE_SIZE
+        const left = Math.max(0, px - regionPadding)
+        const top = Math.max(0, py - regionPadding)
+        const right = Math.min(TEXTURE_SIZE, px + pw + regionPadding)
+        const bottom = Math.min(TEXTURE_SIZE, py + ph + regionPadding)
+        ctx.fillRect(left, top, right - left, bottom - top)
+      })
+
+      // Load all per-view images
+      const entries = Object.entries(viewContentRef.current).filter(([, url]) => !!url)
+      const loaded: { view: string; img: HTMLImageElement }[] = []
+
+      await Promise.all(
+        entries.map(
+          ([view, dataUrl]) =>
+            new Promise<void>((resolve) => {
+              const img = new Image()
+              img.onload = () => {
+                loaded.push({ view, img })
+                resolve()
+              }
+              img.onerror = () => resolve()
+              img.src = dataUrl
+            })
+        )
+      )
+
+      if (currentId !== composeIdRef.current) return
+
+      // Draw each view's user content at its UV position
+      for (const { view, img } of loaded) {
+        const r = UV_REGIONS[view]
+        if (!r) continue
+
+        const scale = VIEW_CONTENT_SCALE[view as UVViewKey] ?? { x: 1, y: 1 }
+        const baseW = r.w * TEXTURE_SIZE
+        const baseH = r.h * TEXTURE_SIZE
+        const drawW = baseW * scale.x
+        const drawH = baseH * scale.y
+        const drawX = r.x * TEXTURE_SIZE + (baseW - drawW) / 2
+        const drawY = r.y * TEXTURE_SIZE + (baseH - drawH) / 2
+
+        ctx.drawImage(
+          img,
+          drawX,
+          drawY,
+          drawW,
+          drawH
+        )
+      }
+
+      if (currentId !== composeIdRef.current) return
+      setCanvasDataUrl(cvs.toDataURL("image/png"))
     }
+  }, [])
 
-    const cvs = compositeCanvasRef.current
-    const ctx = cvs.getContext("2d")
-    if (!ctx) return
-
-    // Fill neutral base first
-    ctx.fillStyle = "#ffffff"
-    ctx.fillRect(0, 0, TEXTURE_SIZE, TEXTURE_SIZE)
-
-    // Apply base color by model part with padding to reduce edge seams
-    const regionPadding = 10
-    Object.entries(UV_REGIONS).forEach(([partKey, region]) => {
-      const color = partColorsRef.current[partKey as keyof PartColors] ?? "#ffffff"
-      ctx.fillStyle = color
-      const px = region.x * TEXTURE_SIZE
-      const py = region.y * TEXTURE_SIZE
-      const pw = region.w * TEXTURE_SIZE
-      const ph = region.h * TEXTURE_SIZE
-      const left = Math.max(0, px - regionPadding)
-      const top = Math.max(0, py - regionPadding)
-      const right = Math.min(TEXTURE_SIZE, px + pw + regionPadding)
-      const bottom = Math.min(TEXTURE_SIZE, py + ph + regionPadding)
-      ctx.fillRect(
-        left,
-        top,
-        right - left,
-        bottom - top
-      )
-    })
-
-    // Neck front/back share one color control (cuello)
-    const neckColor = partColorsRef.current.cuello ?? "#ffffff"
-    ctx.fillStyle = neckColor
-    Object.values(NECK_REGIONS).forEach((region) => {
-      const px = region.x * TEXTURE_SIZE
-      const py = region.y * TEXTURE_SIZE
-      const pw = region.w * TEXTURE_SIZE
-      const ph = region.h * TEXTURE_SIZE
-      const left = Math.max(0, px - regionPadding)
-      const top = Math.max(0, py - regionPadding)
-      const right = Math.min(TEXTURE_SIZE, px + pw + regionPadding)
-      const bottom = Math.min(TEXTURE_SIZE, py + ph + regionPadding)
-      ctx.fillRect(left, top, right - left, bottom - top)
-    })
-
-    // Load all per-view images
-    const entries = Object.entries(viewContentRef.current).filter(([, url]) => !!url)
-    const loaded: { view: string; img: HTMLImageElement }[] = []
-
-    await Promise.all(
-      entries.map(
-        ([view, dataUrl]) =>
-          new Promise<void>((resolve) => {
-            const img = new Image()
-            img.onload = () => {
-              loaded.push({ view, img })
-              resolve()
-            }
-            img.onerror = () => resolve()
-            img.src = dataUrl
-          })
-      )
-    )
-
-    if (currentId !== composeIdRef.current) return
-
-    // Draw each view's user content at its UV position
-    for (const { view, img } of loaded) {
-      const r = UV_REGIONS[view]
-      if (!r) continue
-
-      const scale = VIEW_CONTENT_SCALE[view as UVViewKey] ?? { x: 1, y: 1 }
-      const baseW = r.w * TEXTURE_SIZE
-      const baseH = r.h * TEXTURE_SIZE
-      const drawW = baseW * scale.x
-      const drawH = baseH * scale.y
-      const drawX = r.x * TEXTURE_SIZE + (baseW - drawW) / 2
-      const drawY = r.y * TEXTURE_SIZE + (baseH - drawH) / 2
-
-      ctx.drawImage(
-        img,
-        drawX,
-        drawY,
-        drawW,
-        drawH
-      )
-    }
-
-    if (currentId !== composeIdRef.current) return
-    setCanvasDataUrl(cvs.toDataURL("image/png"))
-  }, [activeView])
+  const composeUVTexture = useCallback(() => {
+    composeUVTextureRef.current()
+  }, [])
 
   const handleCanvasUpdate = useCallback(
     (view: string, userContentDataUrl: string) => {
@@ -249,7 +260,7 @@ export default function PersonalizadorPage() {
       setPersistTick((tick) => tick + 1)
       composeUVTexture()
     },
-    [composeUVTexture]
+    []
   )
 
   const handleViewObjectsChange = useCallback((view: string, serializedObjects: string | null) => {
@@ -268,15 +279,18 @@ export default function PersonalizadorPage() {
   useEffect(() => {
     partColorsRef.current = partColors
     // Recompose texture whenever colors change for real-time feedback
-    composeUVTexture()
-  }, [partColors, composeUVTexture])
+    const timeoutId = setTimeout(() => {
+      composeUVTexture()
+    }, 150) // Debounce rapid color changes (150ms = no lag)
+    return () => clearTimeout(timeoutId)
+  }, [partColors])
 
   useEffect(() => {
     if (!isPersistenceReady) return
     
     // Generate initial texture after persistence is ready
     composeUVTexture()
-  }, [isPersistenceReady, composeUVTexture])
+  }, [isPersistenceReady])
 
   useEffect(() => {
     if (!isPersistenceReady) return

@@ -521,22 +521,31 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
         clampObjectInsideZones(obj)
       })
 
+      let lastClampTime = 0
+      const clampThrottle = (obj: any) => {
+        const now = Date.now()
+        if (now - lastClampTime > 16) { // ~60fps throttle
+          lastClampTime = now
+          clampObjectInsideZones(obj)
+        }
+      }
+
       canvas.on("object:moving", (e: { target?: any }) => {
         const obj = e.target
         if (!obj || obj._isZone) return
-        clampObjectInsideZones(obj)
+        clampThrottle(obj)
       })
 
       canvas.on("object:scaling", (e: { target?: any }) => {
         const obj = e.target
         if (!obj || obj._isZone) return
-        clampObjectInsideZones(obj)
+        clampThrottle(obj)
       })
 
       canvas.on("object:rotating", (e: { target?: any }) => {
         const obj = e.target
         if (!obj || obj._isZone) return
-        clampObjectInsideZones(obj)
+        clampThrottle(obj)
       })
 
       const pasteFromClipboard = async () => {

@@ -1,8 +1,9 @@
 "use client"
 
-import { Upload, ImageIcon, Type, Palette, X } from "lucide-react"
+import { Upload, ImageIcon, Type, Palette, X, ChevronDown, ChevronUp } from "lucide-react"
 import { useRef, useState } from "react"
 import Image from "next/image"
+import { ColorPalette } from "./color-palette"
 
 interface UploadedImage {
   id: string
@@ -41,6 +42,13 @@ const FONT_OPTIONS = [
 export function Toolbar({ onImageUpload, onAddText, onUpdateSelectedTextStyle, onAddUploadedImage, onRemoveUploadedImage, uploadedImages, partColors, onPartColorChange }: ToolbarProps) {
   const imageInputRef = useRef<HTMLInputElement>(null)
   const [activePanel, setActivePanel] = useState<"subidos" | "texto" | "partes" | null>(null)
+  const [expandedParts, setExpandedParts] = useState<Record<string, boolean>>({
+    frente: false,
+    espalda: false,
+    manga_izquierda: false,
+    manga_derecha: false,
+    cuello: false,
+  })
   const [textInput, setTextInput] = useState("Tu texto")
   const [selectedFont, setSelectedFont] = useState(FONT_OPTIONS[0].value)
   const [textColor, setTextColor] = useState("#1a1a2e")
@@ -48,6 +56,10 @@ export function Toolbar({ onImageUpload, onAddText, onUpdateSelectedTextStyle, o
 
   const togglePanel = (panel: "subidos" | "texto" | "partes") => {
     setActivePanel(activePanel === panel ? null : panel)
+  }
+
+  const togglePart = (part: string) => {
+    setExpandedParts((prev) => ({ ...prev, [part]: !prev[part] }))
   }
 
   return (
@@ -122,7 +134,7 @@ export function Toolbar({ onImageUpload, onAddText, onUpdateSelectedTextStyle, o
 
       {/* Expandable panels */}
       {activePanel && (
-        <div className="absolute left-0 top-full z-30 mt-2 w-64 rounded-xl border border-border bg-card p-4 shadow-xl md:left-full md:top-0 md:ml-3 md:mt-0">
+        <div className="absolute left-0 top-full z-30 mt-2 w-72 max-h-96 rounded-xl border border-border bg-card p-4 shadow-xl overflow-y-auto md:left-full md:top-0 md:ml-3 md:mt-0 md:max-h-screen md:w-80 sm:w-screen sm:left-0 sm:right-0 sm:mx-auto sm:max-w-sm">
           <button
             onClick={() => setActivePanel(null)}
             className="absolute right-2 top-2 rounded-md p-1 text-muted-foreground hover:bg-secondary hover:text-foreground"
@@ -278,90 +290,143 @@ export function Toolbar({ onImageUpload, onAddText, onUpdateSelectedTextStyle, o
           )}
 
           {activePanel === "partes" && (
-            <div className="flex flex-col gap-3">
-              <h3 className="text-sm font-bold text-foreground">Color de Partes</h3>
+            <div className="flex flex-col gap-2 max-h-96 overflow-y-auto">
+              <h3 className="sticky top-0 text-sm font-bold text-foreground bg-card pb-2">Color de Partes</h3>
 
-              <div className="flex flex-col gap-2">
-                <label className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2 text-xs font-medium text-foreground">
+              {/* Frente */}
+              <button
+                onClick={() => togglePart("frente")}
+                className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium text-foreground hover:bg-secondary/50 transition-colors"
+              >
+                <span className="flex items-center gap-2">
+                  <div
+                    className="h-5 w-5 rounded border border-border"
+                    style={{ backgroundColor: partColors.frente }}
+                  />
                   Frente
-                  <div className="flex items-center gap-2">
-                    <label className="relative flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-full border-2 border-border">
-                      <div className="absolute inset-0 rounded-full" style={{ backgroundColor: partColors.frente }} />
-                      <input
-                        type="color"
-                        value={partColors.frente}
-                        onChange={(e) => onPartColorChange("frente", e.target.value)}
-                        className="absolute inset-0 cursor-pointer opacity-0"
-                      />
-                    </label>
-                    <span className="text-[11px] text-muted-foreground">{partColors.frente}</span>
-                  </div>
-                </label>
+                </span>
+                {expandedParts.frente ? (
+                  <ChevronUp className="h-4 w-4" />
+                ) : (
+                  <ChevronDown className="h-4 w-4" />
+                )}
+              </button>
+              {expandedParts.frente && (
+                <div className="px-2 pb-3">
+                  <ColorPalette
+                    selected={partColors.frente}
+                    onSelect={(color) => onPartColorChange("frente", color)}
+                  />
+                </div>
+              )}
 
-                <label className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2 text-xs font-medium text-foreground">
+              {/* Espalda */}
+              <button
+                onClick={() => togglePart("espalda")}
+                className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium text-foreground hover:bg-secondary/50 transition-colors"
+              >
+                <span className="flex items-center gap-2">
+                  <div
+                    className="h-5 w-5 rounded border border-border"
+                    style={{ backgroundColor: partColors.espalda }}
+                  />
                   Espalda
-                  <div className="flex items-center gap-2">
-                    <label className="relative flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-full border-2 border-border">
-                      <div className="absolute inset-0 rounded-full" style={{ backgroundColor: partColors.espalda }} />
-                      <input
-                        type="color"
-                        value={partColors.espalda}
-                        onChange={(e) => onPartColorChange("espalda", e.target.value)}
-                        className="absolute inset-0 cursor-pointer opacity-0"
-                      />
-                    </label>
-                    <span className="text-[11px] text-muted-foreground">{partColors.espalda}</span>
-                  </div>
-                </label>
+                </span>
+                {expandedParts.espalda ? (
+                  <ChevronUp className="h-4 w-4" />
+                ) : (
+                  <ChevronDown className="h-4 w-4" />
+                )}
+              </button>
+              {expandedParts.espalda && (
+                <div className="px-2 pb-3">
+                  <ColorPalette
+                    selected={partColors.espalda}
+                    onSelect={(color) => onPartColorChange("espalda", color)}
+                  />
+                </div>
+              )}
 
-                <label className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2 text-xs font-medium text-foreground">
+              {/* Manga Izquierda */}
+              <button
+                onClick={() => togglePart("manga_izquierda")}
+                className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium text-foreground hover:bg-secondary/50 transition-colors"
+              >
+                <span className="flex items-center gap-2">
+                  <div
+                    className="h-5 w-5 rounded border border-border"
+                    style={{ backgroundColor: partColors.manga_izquierda }}
+                  />
                   Manga Izquierda
-                  <div className="flex items-center gap-2">
-                    <label className="relative flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-full border-2 border-border">
-                      <div className="absolute inset-0 rounded-full" style={{ backgroundColor: partColors.manga_izquierda }} />
-                      <input
-                        type="color"
-                        value={partColors.manga_izquierda}
-                        onChange={(e) => onPartColorChange("manga_izquierda", e.target.value)}
-                        className="absolute inset-0 cursor-pointer opacity-0"
-                      />
-                    </label>
-                    <span className="text-[11px] text-muted-foreground">{partColors.manga_izquierda}</span>
-                  </div>
-                </label>
+                </span>
+                {expandedParts.manga_izquierda ? (
+                  <ChevronUp className="h-4 w-4" />
+                ) : (
+                  <ChevronDown className="h-4 w-4" />
+                )}
+              </button>
+              {expandedParts.manga_izquierda && (
+                <div className="px-2 pb-3">
+                  <ColorPalette
+                    selected={partColors.manga_izquierda}
+                    onSelect={(color) => onPartColorChange("manga_izquierda", color)}
+                  />
+                </div>
+              )}
 
-                <label className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2 text-xs font-medium text-foreground">
+              {/* Manga Derecha */}
+              <button
+                onClick={() => togglePart("manga_derecha")}
+                className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium text-foreground hover:bg-secondary/50 transition-colors"
+              >
+                <span className="flex items-center gap-2">
+                  <div
+                    className="h-5 w-5 rounded border border-border"
+                    style={{ backgroundColor: partColors.manga_derecha }}
+                  />
                   Manga Derecha
-                  <div className="flex items-center gap-2">
-                    <label className="relative flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-full border-2 border-border">
-                      <div className="absolute inset-0 rounded-full" style={{ backgroundColor: partColors.manga_derecha }} />
-                      <input
-                        type="color"
-                        value={partColors.manga_derecha}
-                        onChange={(e) => onPartColorChange("manga_derecha", e.target.value)}
-                        className="absolute inset-0 cursor-pointer opacity-0"
-                      />
-                    </label>
-                    <span className="text-[11px] text-muted-foreground">{partColors.manga_derecha}</span>
-                  </div>
-                </label>
+                </span>
+                {expandedParts.manga_derecha ? (
+                  <ChevronUp className="h-4 w-4" />
+                ) : (
+                  <ChevronDown className="h-4 w-4" />
+                )}
+              </button>
+              {expandedParts.manga_derecha && (
+                <div className="px-2 pb-3">
+                  <ColorPalette
+                    selected={partColors.manga_derecha}
+                    onSelect={(color) => onPartColorChange("manga_derecha", color)}
+                  />
+                </div>
+              )}
 
-                <label className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2 text-xs font-medium text-foreground">
+              {/* Cuello */}
+              <button
+                onClick={() => togglePart("cuello")}
+                className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium text-foreground hover:bg-secondary/50 transition-colors"
+              >
+                <span className="flex items-center gap-2">
+                  <div
+                    className="h-5 w-5 rounded border border-border"
+                    style={{ backgroundColor: partColors.cuello }}
+                  />
                   Cuello
-                  <div className="flex items-center gap-2">
-                    <label className="relative flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-full border-2 border-border">
-                      <div className="absolute inset-0 rounded-full" style={{ backgroundColor: partColors.cuello }} />
-                      <input
-                        type="color"
-                        value={partColors.cuello}
-                        onChange={(e) => onPartColorChange("cuello", e.target.value)}
-                        className="absolute inset-0 cursor-pointer opacity-0"
-                      />
-                    </label>
-                    <span className="text-[11px] text-muted-foreground">{partColors.cuello}</span>
-                  </div>
-                </label>
-              </div>
+                </span>
+                {expandedParts.cuello ? (
+                  <ChevronUp className="h-4 w-4" />
+                ) : (
+                  <ChevronDown className="h-4 w-4" />
+                )}
+              </button>
+              {expandedParts.cuello && (
+                <div className="px-2 pb-3">
+                  <ColorPalette
+                    selected={partColors.cuello}
+                    onSelect={(color) => onPartColorChange("cuello", color)}
+                  />
+                </div>
+              )}
             </div>
           )}
         </div>
