@@ -779,7 +779,15 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
     historyRef.current = []
     historyIndexRef.current = -1
     saveToHistory()
-    notifyUpdate()
+    
+    // Call notifyUpdate immediately after objects are restored
+    // Use Promise.resolve().then() for micro-task queue (executes before RAF/macrotasks)
+    // This ensures viewContentRef is populated before parent's composeUVTexture() is called
+    Promise.resolve().then(() => {
+      if (currentInit === initCountRef.current) {
+        notifyUpdate()
+      }
+    })
 
     if (onCanvasReady && fabricRef.current) {
       onCanvasReady(fabricRef.current)

@@ -47,7 +47,11 @@ function TShirtModel({ bodyColor, textureUrl, onReady }: TShirtModelProps) {
         materials.forEach((mat) => {
           if (mat && (mat as THREE.MeshStandardMaterial).isMeshStandardMaterial) {
             const stdMat = mat as THREE.MeshStandardMaterial
-            if (overlayTexture) {
+            // Keep Interior_Negro always black
+            if (mesh.name === "Interior_Negro") {
+              stdMat.color.setHex(0x000000)
+              stdMat.map = null
+            } else if (overlayTexture) {
               stdMat.map = overlayTexture
             }
             stdMat.needsUpdate = true
@@ -83,8 +87,50 @@ interface TShirtPreview3DProps {
 
 export function TShirtPreview3D({ bodyColor, textureUrl }: TShirtPreview3DProps) {
   const [isModelReady, setIsModelReady] = useState(false)
+  const [isLoadingTexture, setIsLoadingTexture] = useState(false)
+  const prevTextureRef = useRef<string | null>(null) // Use null as sentinel, not undefined
+  const textureLoadTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const [displayedTextureUrl, setDisplayedTextureUrl] = useState<string | undefined>(undefined)
+  
   const handleModelReady = useCallback(() => {
     setIsModelReady(true)
+    if (textureUrl) {
+      setDisplayedTextureUrl(textureUrl)
+      prevTextureRef.current = textureUrl // Mark initial texture as "loaded"
+    }
+  }, [textureUrl])
+  
+  // Track texture loading state to show spinner when texture updates (but not on first load)
+  useEffect(() => {
+    if (textureUrl && textureUrl !== prevTextureRef.current) {
+      // Only show spinner if prevTextureRef was already set (not first load)
+      if (prevTextureRef.current !== null) {
+        setIsLoadingTexture(true)
+      }
+      // Clear any pending timeout
+      if (textureLoadTimeoutRef.current) {
+        clearTimeout(textureLoadTimeoutRef.current)
+      }
+      // Wait a bit then update displayed texture (with timeout fallback)
+      textureLoadTimeoutRef.current = setTimeout(() => {
+        setDisplayedTextureUrl(textureUrl)
+        setIsLoadingTexture(false)
+      }, 1500) // Timeout to show new texture or hide spinner
+      prevTextureRef.current = textureUrl
+    } else if (!textureUrl && prevTextureRef.current !== null) {
+      // Texture cleared (blank model) - immediately hide spinner
+      setDisplayedTextureUrl(undefined)
+      setIsLoadingTexture(false)
+      prevTextureRef.current = null
+    }
+  }, [textureUrl])
+  
+  useEffect(() => {
+    return () => {
+      if (textureLoadTimeoutRef.current) {
+        clearTimeout(textureLoadTimeoutRef.current)
+      }
+    }
   }, [])
 
   return (
@@ -97,6 +143,14 @@ export function TShirtPreview3D({ bodyColor, textureUrl }: TShirtPreview3DProps)
           </div>
         </div>
       )}
+      {isLoadingTexture && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/50 backdrop-blur-[1px]">
+          <div className="flex flex-col items-center gap-3 rounded-xl border border-border bg-card px-5 py-4 shadow-lg">
+            <div className="h-6 w-6 animate-spin rounded-full border-4 border-secondary border-t-primary" />
+            <span className="text-xs font-medium text-foreground">Actualizando textura...</span>
+          </div>
+        </div>
+      )}
       <Canvas
         camera={{ position: [0, 0, 0.7], fov: 55 }}
         gl={{ preserveDrawingBuffer: true, antialias: true, logarithmicDepthBuffer: true }}
@@ -106,7 +160,7 @@ export function TShirtPreview3D({ bodyColor, textureUrl }: TShirtPreview3DProps)
         <directionalLight position={[5, 5, 5]} intensity={0.5} />
         <directionalLight position={[-3, 3, -3]} intensity={0.15} />
         <Suspense fallback={<LoadingFallback />}>
-          <TShirtModel bodyColor={bodyColor} textureUrl={textureUrl} onReady={handleModelReady} />
+          <TShirtModel bodyColor={bodyColor} textureUrl={displayedTextureUrl} onReady={handleModelReady} />
           <Environment preset="studio" />
         </Suspense>
         <OrbitControls
@@ -118,6 +172,6 @@ export function TShirtPreview3D({ bodyColor, textureUrl }: TShirtPreview3DProps)
           maxPolarAngle={Math.PI / 1.5}
         />
       </Canvas>
-    </div>
-  )
+      </div>
+    )
 }

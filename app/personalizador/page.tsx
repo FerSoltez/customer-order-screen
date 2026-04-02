@@ -57,8 +57,8 @@ const VIEW_CONTENT_SCALE: Partial<Record<UVViewKey, { x: number; y: number }>> =
 }
 
 // Optimized texture size for balance between quality and performance
-// 8192 is stable without lag on color/image changes
-const TEXTURE_SIZE = 8192
+// 4096 provides excellent quality while maintaining 60fps during 3D manipulation
+const TEXTURE_SIZE = 4096
 
 interface PartColors {
   frente: string
@@ -103,6 +103,10 @@ export default function PersonalizadorPage() {
   const partColorsRef = useRef<PartColors>(partColors)
   const compositeCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const composeIdRef = useRef(0)
+  const imageCacheRef = useRef<Record<string, HTMLImageElement>>({})
+  const composePendingRef = useRef<NodeJS.Timeout | null>(null)
+  const composeIsRunningRef = useRef(false)
+  const rafIdRef = useRef<number | null>(null)
 
   useEffect(() => {
     document.title = "Dark Lion - Personalizador 3D"
@@ -150,6 +154,10 @@ export default function PersonalizadorPage() {
   useEffect(() => {
     // Only define composeUVTexture logic once on mount or activeView change
     composeUVTextureRef.current = async () => {
+      if (composeIsRunningRef.current) return // Skip if already composing
+      composeIsRunningRef.current = true
+      
+      try {
       const currentId = ++composeIdRef.current
 
       if (!compositeCanvasRef.current) {
@@ -202,7 +210,7 @@ export default function PersonalizadorPage() {
         ctx.fillRect(left, top, right - left, bottom - top)
       })
 
-      // Load all per-view images
+      // Load all per-view images (use cache to avoid reloading)
       const entries = Object.entries(viewContentRef.current).filter(([, url]) => !!url)
       const loaded: { view: string; img: HTMLImageElement }[] = []
 
@@ -210,8 +218,16 @@ export default function PersonalizadorPage() {
         entries.map(
           ([view, dataUrl]) =>
             new Promise<void>((resolve) => {
+              // Check cache first
+              if (imageCacheRef.current[dataUrl]) {
+                loaded.push({ view, img: imageCacheRef.current[dataUrl] })
+                resolve()
+                return
+              }
+
               const img = new Image()
               img.onload = () => {
+                imageCacheRef.current[dataUrl] = img // Cache the loaded image
                 loaded.push({ view, img })
                 resolve()
               }
@@ -247,6 +263,9 @@ export default function PersonalizadorPage() {
 
       if (currentId !== composeIdRef.current) return
       setCanvasDataUrl(cvs.toDataURL("image/png"))
+      } finally {
+        composeIsRunningRef.current = false
+      }
     }
   }, [])
 
@@ -258,9 +277,10 @@ export default function PersonalizadorPage() {
     (view: string, userContentDataUrl: string) => {
       viewContentRef.current[view] = userContentDataUrl
       setPersistTick((tick) => tick + 1)
+      // Compose immediately (not debounced) for instant visual feedback on canvas changes
       composeUVTexture()
     },
-    []
+    [composeUVTexture]
   )
 
   const handleViewObjectsChange = useCallback((view: string, serializedObjects: string | null) => {
@@ -278,11 +298,34 @@ export default function PersonalizadorPage() {
 
   useEffect(() => {
     partColorsRef.current = partColors
-    // Recompose texture whenever colors change for real-time feedback
-    const timeoutId = setTimeout(() => {
-      composeUVTexture()
-    }, 150) // Debounce rapid color changes (150ms = no lag)
-    return () => clearTimeout(timeoutId)
+    
+    // Clear any pending timeout
+    if (composePendingRef.current) {
+      clearTimeout(composePendingRef.current)
+    }
+    
+    // Cancel any pending RAF
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current)
+    }
+    
+    // Use requestAnimationFrame for smooth 60fps, bound to browser repaint cycle
+    // Only compose if not already running
+    if (!composeIsRunningRef.current) {
+      rafIdRef.current = requestAnimationFrame(() => {
+        composeUVTexture()
+        rafIdRef.current = null
+      })
+    }
+    
+    return () => {
+      if (composePendingRef.current) {
+        clearTimeout(composePendingRef.current)
+      }
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current)
+      }
+    }
   }, [partColors])
 
   useEffect(() => {
@@ -401,12 +444,21 @@ export default function PersonalizadorPage() {
   }, [addImageToCanvas])
 
   const handleRemoveUploadedImage = useCallback((id: string) => {
-    setUploadedImages((prev) => prev.filter((img) => img.id !== id))
+    setUploadedImages((prev) => {
+      const updated = prev.filter((img) => img.id !== id)
+      // Clean up image cache for removed images
+      const removed = prev.find((img) => img.id === id)
+      if (removed && imageCacheRef.current[removed.dataUrl]) {
+        delete imageCacheRef.current[removed.dataUrl]
+      }
+      return updated
+    })
   }, [])
 
   const handleResetAllChanges = useCallback(() => {
     setPartColors({ ...DEFAULT_PART_COLORS })
     setUploadedImages([])
+    setCanvasDataUrl(undefined)
     viewObjectsRef.current = {}
     setInitialViewObjects({})
     setShowResetConfirm(false)
@@ -512,18 +564,15 @@ export default function PersonalizadorPage() {
               <div className="flex flex-col gap-2">
                 <label className="flex items-center justify-between text-xs font-semibold text-foreground">
                   <span>Color de fondo</span>
-                  <div className="flex items-center gap-2">
-                    <label className="relative flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-full border-2 border-border">
-                      <div className="absolute inset-0 rounded-full" style={{ backgroundColor: bodyColor }} />
-                      <input
-                        type="color"
-                        value={bodyColor}
-                        onChange={(e) => setBodyColor(e.target.value)}
-                        className="absolute inset-0 cursor-pointer opacity-0"
-                      />
-                    </label>
-                    <span className="text-[11px] text-muted-foreground">{bodyColor}</span>
-                  </div>
+                  <label className="relative flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-full border-2 border-border">
+                    <div className="absolute inset-0 rounded-full" style={{ backgroundColor: bodyColor }} />
+                    <input
+                      type="color"
+                      value={bodyColor}
+                      onChange={(e) => setBodyColor(e.target.value)}
+                      className="absolute inset-0 cursor-pointer opacity-0"
+                    />
+                  </label>
                 </label>
               </div>
             </div>

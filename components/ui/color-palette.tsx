@@ -59,7 +59,7 @@ const PALETTE_COLORS = [
 
 export function ColorPalette({ selected, onSelect, label }: ColorPaletteProps) {
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-2 pr-2">
       {label && <label className="text-xs font-semibold text-foreground">{label}</label>}
       <div className="grid grid-cols-6 gap-1.5 sm:grid-cols-7 md:gap-2">
         {PALETTE_COLORS.map((color) => (
