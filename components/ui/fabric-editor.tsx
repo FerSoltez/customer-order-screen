@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useCallback, useState } from "react"
 import { Undo2, Redo2 } from "lucide-react"
+import { AlertDialog, AlertDialogAction, AlertDialogContent, AlertDialogDescription, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import type { TemplateView } from "./template-selector"
 
 // Zone definitions per template view (relative coords 0-1)
@@ -39,6 +40,8 @@ const templateRenderConfig: Record<string, { scale: number; offsetX: number; off
   manga_derecha: { scale: 1, offsetX: 0, offsetY: 0 },
 }
 
+const MANGAS_INTRO_KEY = "darklion-personalizador-mangas-intro-v1"
+
 interface FabricEditorProps {
   activeView: TemplateView
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -71,8 +74,11 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
   const currentViewRef = useRef<string>("")
   const [, setHistoryState] = useState(0)
   const [isHistoryBusy, setIsHistoryBusy] = useState(false)
+  const [showMangasIntro, setShowMangasIntro] = useState(false)
 
   const isMangas = activeView === "mangas"
+  const primaryMangaKey = "manga_derecha"
+  const secondaryMangaKey = "manga_izquierda"
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const persistCanvasState = useCallback((canvas: any, saveKey: string, allowEmpty = false) => {
@@ -98,6 +104,19 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
     if (!initialViewObjects) return
     savedStatesRef.current = { ...initialViewObjects }
   }, [initialViewObjects])
+
+  useEffect(() => {
+    if (!isMangas) return
+
+    try {
+      const seenIntro = localStorage.getItem(MANGAS_INTRO_KEY)
+      if (!seenIntro) {
+        setShowMangasIntro(true)
+      }
+    } catch {
+      setShowMangasIntro(true)
+    }
+  }, [isMangas])
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const hasUserObjects = useCallback((canvas: any) => {
@@ -213,12 +232,12 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
     if (!onCanvasUpdate) return
     if (isMangas) {
       if (hasUserObjects(fabricRef.current) || forceClear) {
-        const d1 = exportUserContent(fabricRef.current, "manga_izquierda")
-        if (d1) onCanvasUpdate("manga_izquierda", d1)
+        const d1 = exportUserContent(fabricRef.current, primaryMangaKey)
+        if (d1) onCanvasUpdate(primaryMangaKey, d1)
       }
       if (hasUserObjects(fabricRef2.current) || forceClear) {
-        const d2 = exportUserContent(fabricRef2.current, "manga_derecha")
-        if (d2) onCanvasUpdate("manga_derecha", d2)
+        const d2 = exportUserContent(fabricRef2.current, secondaryMangaKey)
+        if (d2) onCanvasUpdate(secondaryMangaKey, d2)
       }
     } else {
       if (hasUserObjects(fabricRef.current) || forceClear) {
@@ -290,10 +309,11 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
 
         if (half) {
           const halfH = Math.floor(srcH / 2)
-          tempCanvas.width = srcW
-          tempCanvas.height = halfH
           const sy = half === "top" ? 0 : halfH
-          tempCtx.drawImage(sourceImg, 0, sy, srcW, halfH, 0, 0, srcW, halfH)
+          const segmentHeight = half === "top" ? halfH : (srcH - sy)
+          tempCanvas.width = srcW
+          tempCanvas.height = segmentHeight
+          tempCtx.drawImage(sourceImg, 0, sy, srcW, segmentHeight, 0, 0, srcW, segmentHeight)
         } else {
           tempCanvas.width = srcW
           tempCanvas.height = srcH
@@ -667,11 +687,11 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
     if (currentViewRef.current) {
       const prevIsMangas = currentViewRef.current === "mangas"
       if (fabricRef.current) {
-        const saveKey = prevIsMangas ? "manga_izquierda" : currentViewRef.current
+        const saveKey = prevIsMangas ? primaryMangaKey : currentViewRef.current
         persistCanvasState(fabricRef.current, saveKey)
       }
       if (fabricRef2.current && prevIsMangas) {
-        persistCanvasState(fabricRef2.current, "manga_derecha")
+        persistCanvasState(fabricRef2.current, secondaryMangaKey)
       }
     }
 
@@ -717,13 +737,13 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
         singleHeight = finalWidth / mangaAspect
       }
 
-      const c1 = await initSingleCanvas(canvasRef.current, "manga_izquierda", finalWidth, singleHeight, currentInit, "top")
+      const c1 = await initSingleCanvas(canvasRef.current, primaryMangaKey, finalWidth, singleHeight, currentInit, "top")
       if (!c1 || currentInit !== initCountRef.current) return
 
       fabricRef.current = c1
 
       if (canvasRef2.current) {
-        const c2 = await initSingleCanvas(canvasRef2.current, "manga_derecha", finalWidth, singleHeight, currentInit, "bottom")
+        const c2 = await initSingleCanvas(canvasRef2.current, secondaryMangaKey, finalWidth, singleHeight, currentInit, "bottom")
         if (!c2 || currentInit !== initCountRef.current) return
         fabricRef2.current = c2
       }
@@ -766,8 +786,8 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
       } catch { /* ignore */ }
     }
     if (isMangas) {
-      if (fabricRef.current) await restoreUserObjects(fabricRef.current, "manga_izquierda")
-      if (fabricRef2.current) await restoreUserObjects(fabricRef2.current, "manga_derecha")
+      if (fabricRef.current) await restoreUserObjects(fabricRef.current, primaryMangaKey)
+      if (fabricRef2.current) await restoreUserObjects(fabricRef2.current, secondaryMangaKey)
     } else {
       if (fabricRef.current) await restoreUserObjects(fabricRef.current, activeView)
     }
@@ -808,7 +828,7 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
     events.forEach((evt) => {
       fabricRef.current?.on(evt, () => {
         if (!isLoadingRef.current) {
-          const saveKey = isMangas ? "manga_izquierda" : activeView
+          const saveKey = isMangas ? primaryMangaKey : activeView
           persistCanvasState(fabricRef.current, saveKey, evt === "object:removed")
           saveToHistory()
           notifyUpdate()
@@ -820,7 +840,7 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
       events.forEach((evt) => {
         fabricRef2.current?.on(evt, () => {
           if (!isLoadingRef.current) {
-            persistCanvasState(fabricRef2.current, "manga_derecha", evt === "object:removed")
+            persistCanvasState(fabricRef2.current, secondaryMangaKey, evt === "object:removed")
             notifyUpdate()
           }
         })
@@ -890,7 +910,7 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
     finally {
       fabricRef.current.renderAll()
       isLoadingRef.current = false
-      const saveKey = isMangas ? "manga_izquierda" : activeView
+      const saveKey = isMangas ? primaryMangaKey : activeView
       persistCanvasState(fabricRef.current, saveKey, true)
       notifyUpdate(true)
       setHistoryState((s) => s + 1)
@@ -925,7 +945,7 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
     finally {
       fabricRef.current.renderAll()
       isLoadingRef.current = false
-      const saveKey = isMangas ? "manga_izquierda" : activeView
+      const saveKey = isMangas ? primaryMangaKey : activeView
       persistCanvasState(fabricRef.current, saveKey, true)
       notifyUpdate(true)
       setHistoryState((s) => s + 1)
@@ -953,6 +973,15 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
 
   const canUndo = !isHistoryBusy && historyIndexRef.current > 0
   const canRedo = !isHistoryBusy && historyIndexRef.current < historyRef.current.length - 1
+
+  const handleCloseMangasIntro = useCallback(() => {
+    setShowMangasIntro(false)
+    try {
+      localStorage.setItem(MANGAS_INTRO_KEY, "seen")
+    } catch {
+      // ignore storage errors
+    }
+  }, [])
 
   return (
     <div className="flex flex-1 flex-col">
@@ -996,6 +1025,40 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
           <Redo2 className="h-3.5 w-3.5" />
         </button>
       </div>
+
+      <AlertDialog
+        open={showMangasIntro}
+        onOpenChange={(open) => {
+          if (!open) handleCloseMangasIntro()
+        }}
+      >
+        <AlertDialogContent className="max-w-md">
+          <div className="flex flex-col gap-3">
+            <AlertDialogHeader>
+              <AlertDialogTitle className="text-xl font-bold text-foreground">
+                Personaliza una manga
+              </AlertDialogTitle>
+              <AlertDialogDescription className="text-sm text-muted-foreground">
+                Antes de agregar imágenes o textos, haz clic en la manga que quieres personalizar.
+                Así el contenido se colocará en el molde correcto.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <div className="overflow-hidden rounded-lg border border-border bg-muted/40 p-1">
+              <img
+                src="/images/InformacionMangas.png"
+                alt="Referencia para personalizar mangas"
+                className="h-auto w-full rounded-md"
+                draggable={false}
+              />
+            </div>
+            <div className="flex justify-end">
+              <AlertDialogAction onClick={handleCloseMangasIntro} className="bg-purple-600 hover:bg-purple-700 text-white">
+                Entendido
+              </AlertDialogAction>
+            </div>
+          </div>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

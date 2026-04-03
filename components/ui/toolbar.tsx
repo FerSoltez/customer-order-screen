@@ -370,7 +370,7 @@ export function Toolbar({ onImageUpload, onAddText, onUpdateSelectedTextStyle, o
                   <span className="flex items-center gap-2">
                     <div
                       className="h-5 w-5 rounded border border-border"
-                      style={{ backgroundColor: partColors.manga_izquierda }}
+                      style={{ backgroundColor: partColors.manga_derecha }}
                     />
                     Manga Izquierda
                   </span>
@@ -383,8 +383,8 @@ export function Toolbar({ onImageUpload, onAddText, onUpdateSelectedTextStyle, o
                 {expandedParts.manga_izquierda && (
                   <div className="px-2 pb-3">
                     <ColorPalette
-                      selected={partColors.manga_izquierda}
-                      onSelect={(color) => onPartColorChange("manga_izquierda", color)}
+                      selected={partColors.manga_derecha}
+                      onSelect={(color) => onPartColorChange("manga_derecha", color)}
                     />
                   </div>
                 )}
@@ -396,7 +396,7 @@ export function Toolbar({ onImageUpload, onAddText, onUpdateSelectedTextStyle, o
                   <span className="flex items-center gap-2">
                     <div
                       className="h-5 w-5 rounded border border-border"
-                      style={{ backgroundColor: partColors.manga_derecha }}
+                      style={{ backgroundColor: partColors.manga_izquierda }}
                     />
                     Manga Derecha
                   </span>
@@ -409,8 +409,8 @@ export function Toolbar({ onImageUpload, onAddText, onUpdateSelectedTextStyle, o
                 {expandedParts.manga_derecha && (
                   <div className="px-2 pb-3">
                     <ColorPalette
-                      selected={partColors.manga_derecha}
-                      onSelect={(color) => onPartColorChange("manga_derecha", color)}
+                      selected={partColors.manga_izquierda}
+                      onSelect={(color) => onPartColorChange("manga_izquierda", color)}
                     />
                   </div>
                 )}

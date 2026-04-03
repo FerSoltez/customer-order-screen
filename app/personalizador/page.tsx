@@ -59,6 +59,7 @@ const VIEW_CONTENT_SCALE: Partial<Record<UVViewKey, { x: number; y: number }>> =
 // Optimized texture size for balance between quality and performance
 // 4096 provides excellent quality while maintaining 60fps during 3D manipulation
 const TEXTURE_SIZE = 4096
+const INTRO_MODAL_KEY = "darklion-personalizador-intro-v1"
 
 interface PartColors {
   frente: string
@@ -73,6 +74,7 @@ interface PersistedPersonalizadorState {
   partColors?: PartColors
   uploadedImages?: UploadedImage[]
   viewObjects?: Record<string, string>
+  viewContent?: Record<string, string>
 }
 
 const STORAGE_KEY = "darklion-personalizador-3d-v1"
@@ -96,6 +98,7 @@ export default function PersonalizadorPage() {
   const [showResetConfirm, setShowResetConfirm] = useState(false)
   const [showCancelConfirm, setShowCancelConfirm] = useState(false)
   const [showSaveConfirm, setShowSaveConfirm] = useState(false)
+  const [showIntroModal, setShowIntroModal] = useState(false)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fabricCanvasRef = useRef<any>(null)
   const viewContentRef = useRef<Record<string, string>>({})
@@ -137,12 +140,29 @@ export default function PersonalizadorPage() {
         viewObjectsRef.current = parsed.viewObjects
         setInitialViewObjects(parsed.viewObjects)
       }
+
+      if (parsed.viewContent && typeof parsed.viewContent === "object") {
+        viewContentRef.current = parsed.viewContent
+      }
     } catch {
       // ignore invalid saved state
     } finally {
       setIsPersistenceReady(true)
     }
   }, [])
+
+  useEffect(() => {
+    if (!isPersistenceReady) return
+
+    try {
+      const seenIntro = localStorage.getItem(INTRO_MODAL_KEY)
+      if (!seenIntro) {
+        setShowIntroModal(true)
+      }
+    } catch {
+      setShowIntroModal(true)
+    }
+  }, [isPersistenceReady])
 
   const handleCanvasReady = useCallback((canvas: unknown) => {
     fabricCanvasRef.current = canvas
@@ -344,6 +364,7 @@ export default function PersonalizadorPage() {
         partColors,
         uploadedImages,
         viewObjects: viewObjectsRef.current,
+        viewContent: viewContentRef.current,
       }
       localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
     } catch {
@@ -459,6 +480,7 @@ export default function PersonalizadorPage() {
     setPartColors({ ...DEFAULT_PART_COLORS })
     setUploadedImages([])
     setCanvasDataUrl(undefined)
+    viewContentRef.current = {}
     viewObjectsRef.current = {}
     setInitialViewObjects({})
     setShowResetConfirm(false)
@@ -470,6 +492,15 @@ export default function PersonalizadorPage() {
     }
 
     window.location.reload()
+  }, [])
+
+  const handleCloseIntroModal = useCallback(() => {
+    setShowIntroModal(false)
+    try {
+      localStorage.setItem(INTRO_MODAL_KEY, "seen")
+    } catch {
+      // ignore storage errors
+    }
   }, [])
 
   return (
@@ -538,13 +569,15 @@ export default function PersonalizadorPage() {
             <div className="absolute top-2 right-2 z-10">
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <button className="p-1 rounded-full hover:bg-black/10 transition-colors" tabIndex={-1}>
+                  <button className="select-none rounded-full p-1 transition-colors hover:bg-black/10" tabIndex={-1} onDragStart={(e) => e.preventDefault()}>
                     <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white">
                       <NextImage
                         src="/images/icon-rotate.png"
                         alt="Información del modelo 3D"
                         width={20}
                         height={20}
+                        draggable={false}
+                        className="pointer-events-none select-none"
                       />
                     </div>
                   </button>
@@ -699,6 +732,29 @@ export default function PersonalizadorPage() {
       </AlertDialog>
 
       <Footer />
+
+      <AlertDialog open={showIntroModal} onOpenChange={(open) => {
+        if (!open) handleCloseIntroModal()
+      }}>
+        <AlertDialogContent className="max-w-md">
+          <div className="flex flex-col gap-3">
+            <AlertDialogHeader>
+              <AlertDialogTitle className="text-xl font-bold text-foreground">
+                Bienvenido al personalizador
+              </AlertDialogTitle>
+              <AlertDialogDescription className="text-sm text-muted-foreground">
+                Para obtener la mejor calidad en tus diseños, usa imágenes en formato PNG (preferido) o JPG.
+                Recomendamos archivos de alta resolución, con fondo transparente para logos, y evitar capturas borrosas.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <div className="flex justify-end">
+              <AlertDialogAction onClick={handleCloseIntroModal} className="bg-purple-600 hover:bg-purple-700 text-white">
+                Entendido
+              </AlertDialogAction>
+            </div>
+          </div>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

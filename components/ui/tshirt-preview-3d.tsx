@@ -47,9 +47,10 @@ function TShirtModel({ bodyColor, textureUrl, onReady }: TShirtModelProps) {
         materials.forEach((mat) => {
           if (mat && (mat as THREE.MeshStandardMaterial).isMeshStandardMaterial) {
             const stdMat = mat as THREE.MeshStandardMaterial
-            // Keep Interior_Negro always black
-            if (mesh.name === "Interior_Negro") {
-              stdMat.color.setHex(0x000000)
+            // Keep inner layer white
+            if (mesh.name === "Camisa_Interior" || mesh.name === "Interior_Negro") {
+              stdMat.color.setHex(0xffffff)
+              stdMat.roughness = 1
               stdMat.map = null
             } else if (overlayTexture) {
               stdMat.map = overlayTexture

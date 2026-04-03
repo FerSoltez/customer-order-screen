@@ -23,18 +23,20 @@ export function TemplateSelector({ activeView, onViewChange }: TemplateSelectorP
           <button
             key={template.id}
             onClick={() => onViewChange(template.id)}
-            className={`flex flex-col items-center gap-2 rounded-2xl p-3 transition-all ${
+            className={`flex select-none flex-col items-center gap-2 rounded-2xl p-3 transition-all ${
               activeView === template.id
                 ? "ring-3 ring-purple-600 bg-white/10"
                 : "opacity-60 hover:opacity-100"
             }`}
+            onDragStart={(e) => e.preventDefault()}
           >
             <div className="relative h-16 w-14">
               <Image
                 src={template.image}
                 alt={template.label}
                 fill
-                className="object-contain"
+                draggable={false}
+                className="pointer-events-none select-none object-contain"
               />
             </div>
             <span className="text-xs font-bold tracking-wider text-foreground">
