@@ -1,19 +1,23 @@
 "use client"
 
 import { Canvas } from "@react-three/fiber"
+import { useThree } from "@react-three/fiber"
 import { OrbitControls, Environment, useGLTF } from "@react-three/drei"
 import { useRef, useMemo, useEffect, Suspense, useState, useCallback } from "react"
 import * as THREE from "three"
 
 interface TShirtModelProps {
   bodyColor: string
-  textureUrl?: string
+  textureCanvas?: HTMLCanvasElement | null
+  textureRevision?: number
   onReady?: () => void
 }
 
-function TShirtModel({ bodyColor, textureUrl, onReady }: TShirtModelProps) {
+function TShirtModel({ bodyColor, textureCanvas, textureRevision = 0, onReady }: TShirtModelProps) {
   const groupRef = useRef<THREE.Group>(null!)
   const { scene } = useGLTF("/models/CamisaCuelloRedondo.glb")
+  const { gl } = useThree()
+  const appliedTextureRef = useRef<THREE.Texture | null>(null)
 
   // Clone the scene so we can safely modify materials without side-effects
   const clonedScene = useMemo(() => {
@@ -25,21 +29,27 @@ function TShirtModel({ bodyColor, textureUrl, onReady }: TShirtModelProps) {
     return clone
   }, [scene])
 
-  const overlayTexture = useMemo(() => {
-    if (!textureUrl) return null
-    const tex = new THREE.TextureLoader().load(textureUrl)
-    tex.flipY = false
-    tex.colorSpace = THREE.SRGBColorSpace
-    tex.wrapS = THREE.ClampToEdgeWrapping
-    tex.wrapT = THREE.ClampToEdgeWrapping
-    tex.generateMipmaps = true
-    tex.minFilter = THREE.LinearMipmapLinearFilter
-    tex.magFilter = THREE.LinearFilter
-    tex.anisotropy = 16
-    return tex
-  }, [textureUrl])
+  useEffect(() => {
+    // Keep color pipeline consistent so textures do not look washed out.
+    gl.outputColorSpace = THREE.SRGBColorSpace
+  }, [gl])
 
   useEffect(() => {
+    if (!textureCanvas) return
+
+    const maxAnisotropy = Math.max(1, gl.capabilities.getMaxAnisotropy())
+    const nextTexture = new THREE.CanvasTexture(textureCanvas)
+    nextTexture.flipY = false
+    nextTexture.wrapS = THREE.ClampToEdgeWrapping
+    nextTexture.wrapT = THREE.ClampToEdgeWrapping
+    nextTexture.colorSpace = THREE.SRGBColorSpace
+    // Dynamic texture: keep update cost stable and avoid mipmap regeneration overhead.
+    nextTexture.generateMipmaps = false
+    nextTexture.minFilter = THREE.LinearFilter
+    nextTexture.magFilter = THREE.LinearFilter
+    nextTexture.anisotropy = maxAnisotropy
+    nextTexture.needsUpdate = true
+
     clonedScene.traverse((child) => {
       if ((child as THREE.Mesh).isMesh) {
         const mesh = child as THREE.Mesh
@@ -51,17 +61,37 @@ function TShirtModel({ bodyColor, textureUrl, onReady }: TShirtModelProps) {
             if (mesh.name === "Camisa_Interior" || mesh.name === "Interior_Negro") {
               stdMat.color.setHex(0xffffff)
               stdMat.roughness = 1
+              if (stdMat.map) {
+                stdMat.map.dispose()
+              }
               stdMat.map = null
-            } else if (overlayTexture) {
-              stdMat.map = overlayTexture
+            } else {
+              // Dispose old GPU texture before replacing map to prevent VRAM leaks.
+              if (stdMat.map && stdMat.map !== nextTexture) {
+                stdMat.map.dispose()
+              }
+              stdMat.map = nextTexture
             }
             stdMat.needsUpdate = true
           }
         })
       }
     })
+    if (appliedTextureRef.current && appliedTextureRef.current !== nextTexture) {
+      appliedTextureRef.current.dispose()
+    }
+    appliedTextureRef.current = nextTexture
     onReady?.()
-  }, [clonedScene, overlayTexture, onReady])
+  }, [clonedScene, gl, onReady, textureCanvas, textureRevision])
+
+  useEffect(() => {
+    return () => {
+      if (appliedTextureRef.current) {
+        appliedTextureRef.current.dispose()
+        appliedTextureRef.current = null
+      }
+    }
+  }, [])
 
   return (
     <group ref={groupRef}>
@@ -83,29 +113,28 @@ function LoadingFallback() {
 
 interface TShirtPreview3DProps {
   bodyColor: string
-  textureUrl?: string
+  textureCanvas?: HTMLCanvasElement | null
+  textureRevision?: number
 }
 
-export function TShirtPreview3D({ bodyColor, textureUrl }: TShirtPreview3DProps) {
+export function TShirtPreview3D({ bodyColor, textureCanvas, textureRevision = 0 }: TShirtPreview3DProps) {
   const [isModelReady, setIsModelReady] = useState(false)
   const [isLoadingTexture, setIsLoadingTexture] = useState(false)
-  const prevTextureRef = useRef<string | null>(null) // Use null as sentinel, not undefined
+  const prevTextureRevisionRef = useRef<number>(-1)
   const textureLoadTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-  const [displayedTextureUrl, setDisplayedTextureUrl] = useState<string | undefined>(undefined)
+  const [displayedTextureRevision, setDisplayedTextureRevision] = useState(0)
   
   const handleModelReady = useCallback(() => {
     setIsModelReady(true)
-    if (textureUrl) {
-      setDisplayedTextureUrl(textureUrl)
-      prevTextureRef.current = textureUrl // Mark initial texture as "loaded"
-    }
-  }, [textureUrl])
+    setDisplayedTextureRevision(textureRevision)
+    prevTextureRevisionRef.current = textureRevision
+  }, [textureRevision])
   
   // Track texture loading state to show spinner when texture updates (but not on first load)
   useEffect(() => {
-    if (textureUrl && textureUrl !== prevTextureRef.current) {
+    if (textureRevision !== prevTextureRevisionRef.current) {
       // Only show spinner if prevTextureRef was already set (not first load)
-      if (prevTextureRef.current !== null) {
+      if (prevTextureRevisionRef.current >= 0) {
         setIsLoadingTexture(true)
       }
       // Clear any pending timeout
@@ -114,17 +143,12 @@ export function TShirtPreview3D({ bodyColor, textureUrl }: TShirtPreview3DProps)
       }
       // Wait a bit then update displayed texture (with timeout fallback)
       textureLoadTimeoutRef.current = setTimeout(() => {
-        setDisplayedTextureUrl(textureUrl)
+        setDisplayedTextureRevision(textureRevision)
         setIsLoadingTexture(false)
-      }, 1500) // Timeout to show new texture or hide spinner
-      prevTextureRef.current = textureUrl
-    } else if (!textureUrl && prevTextureRef.current !== null) {
-      // Texture cleared (blank model) - immediately hide spinner
-      setDisplayedTextureUrl(undefined)
-      setIsLoadingTexture(false)
-      prevTextureRef.current = null
+      }, 180)
+      prevTextureRevisionRef.current = textureRevision
     }
-  }, [textureUrl])
+  }, [textureRevision])
   
   useEffect(() => {
     return () => {
@@ -154,14 +178,14 @@ export function TShirtPreview3D({ bodyColor, textureUrl }: TShirtPreview3DProps)
       )}
       <Canvas
         camera={{ position: [0, 0, 0.7], fov: 55 }}
-        gl={{ preserveDrawingBuffer: true, antialias: true, logarithmicDepthBuffer: true }}
+        gl={{ preserveDrawingBuffer: false, antialias: true, logarithmicDepthBuffer: true, powerPreference: "high-performance" }}
       >
         <color attach="background" args={[bodyColor]} />
         <ambientLight intensity={0.3} />
         <directionalLight position={[5, 5, 5]} intensity={0.5} />
         <directionalLight position={[-3, 3, -3]} intensity={0.15} />
         <Suspense fallback={<LoadingFallback />}>
-          <TShirtModel bodyColor={bodyColor} textureUrl={displayedTextureUrl} onReady={handleModelReady} />
+          <TShirtModel bodyColor={bodyColor} textureCanvas={textureCanvas} textureRevision={displayedTextureRevision} onReady={handleModelReady} />
           <Environment preset="studio" />
         </Suspense>
         <OrbitControls

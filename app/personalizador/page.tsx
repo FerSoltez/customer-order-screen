@@ -57,8 +57,8 @@ const VIEW_CONTENT_SCALE: Partial<Record<UVViewKey, { x: number; y: number }>> =
 }
 
 // Optimized texture size for balance between quality and performance
-// 4096 provides excellent quality while maintaining 60fps during 3D manipulation
-const TEXTURE_SIZE = 4096
+// 2048x2048 is the best quality/performance compromise for dynamic apparel textures.
+const TEXTURE_SIZE = 2048
 const INTRO_MODAL_KEY = "darklion-personalizador-intro-v1"
 const MAX_TEXT_LENGTH = 15
 
@@ -104,7 +104,8 @@ export default function PersonalizadorPage() {
   const [activeView, setActiveView] = useState<TemplateView>("frente")
   const [bodyColor, setBodyColor] = useState("#393d42")
   const [partColors, setPartColors] = useState<PartColors>(DEFAULT_PART_COLORS)
-  const [canvasDataUrl, setCanvasDataUrl] = useState<string | undefined>()
+  const [textureCanvas, setTextureCanvas] = useState<HTMLCanvasElement | null>(null)
+  const [textureRevision, setTextureRevision] = useState(0)
   const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([])
   const [initialViewObjects, setInitialViewObjects] = useState<Record<string, string>>({})
   const [isPersistenceReady, setIsPersistenceReady] = useState(false)
@@ -274,6 +275,8 @@ export default function PersonalizadorPage() {
       const cvs = compositeCanvasRef.current
       const ctx = cvs.getContext("2d")
       if (!ctx) return
+      ctx.imageSmoothingEnabled = true
+      ctx.imageSmoothingQuality = "high"
 
       // Fill neutral base first
       ctx.fillStyle = "#ffffff"
@@ -367,7 +370,8 @@ export default function PersonalizadorPage() {
       }
 
       if (currentId !== composeIdRef.current) return
-      setCanvasDataUrl(cvs.toDataURL("image/png"))
+      setTextureCanvas(cvs)
+      setTextureRevision((v) => v + 1)
       } finally {
         composeIsRunningRef.current = false
       }
@@ -654,7 +658,7 @@ export default function PersonalizadorPage() {
   const handleResetAllChanges = useCallback(() => {
     setPartColors({ ...DEFAULT_PART_COLORS })
     setUploadedImages([])
-    setCanvasDataUrl(undefined)
+    setTextureCanvas(null)
     viewContentRef.current = {}
     viewObjectsRef.current = {}
     uploadedImagesRef.current = []
@@ -781,7 +785,7 @@ export default function PersonalizadorPage() {
             </div>
 
             <div className="relative flex-1">
-              <TShirtPreview3D bodyColor={bodyColor} textureUrl={canvasDataUrl} />
+              <TShirtPreview3D bodyColor={bodyColor} textureCanvas={textureCanvas} textureRevision={textureRevision} />
             </div>
 
             {/* 3D Background Color Control */}

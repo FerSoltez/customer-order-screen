@@ -42,6 +42,7 @@ const templateRenderConfig: Record<string, { scale: number; offsetX: number; off
 
 const MANGAS_INTRO_KEY = "darklion-personalizador-mangas-intro-v1"
 const HISTORY_STORAGE_KEY = "darklion-personalizador-history-v1"
+const FABRIC_EXPORT_TARGET_SIZE = 2048
 
 interface PersistedHistoryItem {
   stack: string[]
@@ -179,6 +180,9 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
       const cw = canvas.width
       const ch = canvas.height
       if (!cw || !ch) return null
+      const exportMultiplier = Math.max(1, Math.min(4, FABRIC_EXPORT_TARGET_SIZE / Math.max(cw, ch)))
+      const scaledW = Math.max(1, Math.round(cw * exportMultiplier))
+      const scaledH = Math.max(1, Math.round(ch * exportMultiplier))
 
       // Temporarily hide background/zones to get user-only content with transparency
       const origBg = canvas.backgroundColor
@@ -200,17 +204,26 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
       // Get canvas element with user content (now without background)
       let userCanvas: HTMLCanvasElement
       try {
-        userCanvas = canvas.toCanvasElement?.() || canvas.getElement?.() || canvas.lowerCanvasEl
+        userCanvas = canvas.toCanvasElement?.(exportMultiplier) || canvas.getElement?.() || canvas.lowerCanvasEl
         if (!userCanvas) {
           // Fallback: create a new canvas and render to it
           userCanvas = document.createElement("canvas")
-          userCanvas.width = cw
-          userCanvas.height = ch
+          userCanvas.width = scaledW
+          userCanvas.height = scaledH
           const ctx = userCanvas.getContext("2d")
           if (ctx) {
             const imageData = canvas.getImageData?.()
             if (imageData) {
-              ctx.putImageData(imageData, 0, 0)
+              const tmp = document.createElement("canvas")
+              tmp.width = cw
+              tmp.height = ch
+              const tmpCtx = tmp.getContext("2d")
+              if (tmpCtx) {
+                tmpCtx.putImageData(imageData, 0, 0)
+                ctx.imageSmoothingEnabled = true
+                ctx.imageSmoothingQuality = "high"
+                ctx.drawImage(tmp, 0, 0, scaledW, scaledH)
+              }
             }
           }
         }
@@ -231,8 +244,8 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
 
       // Create offscreen canvas with transparent background
       const offscreen = document.createElement("canvas")
-      offscreen.width = cw
-      offscreen.height = ch
+      offscreen.width = scaledW
+      offscreen.height = scaledH
       const ctx = offscreen.getContext("2d", { alpha: true, willReadFrequently: true })
       if (!ctx) {
         // Fallback: return user canvas directly if we can't clip to zones
@@ -244,20 +257,22 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
       }
 
       // Clear with full transparency
-      ctx.clearRect(0, 0, cw, ch)
+      ctx.clearRect(0, 0, scaledW, scaledH)
+      ctx.imageSmoothingEnabled = true
+      ctx.imageSmoothingQuality = "high"
 
       // Draw only the zone regions (no clip artifacts)
       if (zones.length > 0) {
         for (const z of zones) {
-          const sx = z.x * cw
-          const sy = z.y * ch
-          const sw = z.w * cw
-          const sh = z.h * ch
+          const sx = z.x * scaledW
+          const sy = z.y * scaledH
+          const sw = z.w * scaledW
+          const sh = z.h * scaledH
           ctx.drawImage(userCanvas, sx, sy, sw, sh, sx, sy, sw, sh)
         }
       } else {
         // If no zones, draw entire user canvas
-        ctx.drawImage(userCanvas, 0, 0, cw, ch)
+        ctx.drawImage(userCanvas, 0, 0, scaledW, scaledH)
       }
 
       // Export to PNG with preserved transparency
