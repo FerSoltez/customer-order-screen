@@ -29,15 +29,12 @@ interface ToolbarProps {
 }
 
 const FONT_OPTIONS = [
-  { label: "Inter", value: "Inter, sans-serif" },
-  { label: "Arial", value: "Arial, sans-serif" },
-  { label: "Georgia", value: "Georgia, serif" },
-  { label: "Courier", value: "'Courier New', monospace" },
-  { label: "Impact", value: "Impact, sans-serif" },
-  { label: "Comic Sans", value: "'Comic Sans MS', cursive" },
-  { label: "Times New Roman", value: "'Times New Roman', serif" },
-  { label: "Verdana", value: "Verdana, sans-serif" },
+  { label: "CHAKRA PETCH", value: "'Chakra Petch', sans-serif" },
+  { label: "ARBORIA", value: "'Arboria', sans-serif" },
+  { label: "MONTSERRAT", value: "'Montserrat', sans-serif" },
 ]
+
+const MAX_TEXT_LENGTH = 15
 
 export function Toolbar({ onImageUpload, onAddText, onUpdateSelectedTextStyle, onAddUploadedImage, onRemoveUploadedImage, uploadedImages, partColors, onPartColorChange }: ToolbarProps) {
   const imageInputRef = useRef<HTMLInputElement>(null)
@@ -226,10 +223,12 @@ export function Toolbar({ onImageUpload, onAddText, onUpdateSelectedTextStyle, o
                     id="text-input"
                     type="text"
                     value={textInput}
-                    onChange={(e) => setTextInput(e.target.value)}
+                    onChange={(e) => setTextInput(e.target.value.slice(0, MAX_TEXT_LENGTH))}
+                    maxLength={MAX_TEXT_LENGTH}
                     className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary"
                     placeholder="Escribe tu texto..."
                   />
+                  <span className="text-[11px] text-muted-foreground">{textInput.length}/{MAX_TEXT_LENGTH}</span>
                 </div>
 
                 <div className="flex flex-col gap-1">
@@ -284,7 +283,7 @@ export function Toolbar({ onImageUpload, onAddText, onUpdateSelectedTextStyle, o
                 <button
                   onClick={() => {
                     if (textInput.trim()) {
-                      onAddText(textInput, selectedFont, textColor)
+                      onAddText(textInput.slice(0, MAX_TEXT_LENGTH), selectedFont, textColor)
                       setActivePanel(null)
                     }
                   }}

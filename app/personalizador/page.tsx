@@ -60,6 +60,7 @@ const VIEW_CONTENT_SCALE: Partial<Record<UVViewKey, { x: number; y: number }>> =
 // 4096 provides excellent quality while maintaining 60fps during 3D manipulation
 const TEXTURE_SIZE = 4096
 const INTRO_MODAL_KEY = "darklion-personalizador-intro-v1"
+const MAX_TEXT_LENGTH = 15
 
 interface PartColors {
   frente: string
@@ -69,12 +70,25 @@ interface PartColors {
   cuello: string
 }
 
+interface UnifiedHistoryItem {
+  partColors: PartColors
+  viewObjects: Record<string, string>
+  viewContent: Record<string, string>
+  uploadedImages: UploadedImage[]
+}
+
+interface PersistedUnifiedHistory {
+  stack: UnifiedHistoryItem[]
+  index: number
+}
+
 interface PersistedPersonalizadorState {
   activeView?: TemplateView
   partColors?: PartColors
   uploadedImages?: UploadedImage[]
   viewObjects?: Record<string, string>
   viewContent?: Record<string, string>
+  unifiedHistory?: PersistedUnifiedHistory
 }
 
 const STORAGE_KEY = "darklion-personalizador-3d-v1"
@@ -99,11 +113,17 @@ export default function PersonalizadorPage() {
   const [showCancelConfirm, setShowCancelConfirm] = useState(false)
   const [showSaveConfirm, setShowSaveConfirm] = useState(false)
   const [showIntroModal, setShowIntroModal] = useState(false)
+  const [unifiedHistoryTick, setUnifiedHistoryTick] = useState(0)
+  const [fabricEditorRevision, setFabricEditorRevision] = useState(0)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fabricCanvasRef = useRef<any>(null)
   const viewContentRef = useRef<Record<string, string>>({})
   const viewObjectsRef = useRef<Record<string, string>>({})
   const partColorsRef = useRef<PartColors>(partColors)
+  const uploadedImagesRef = useRef<UploadedImage[]>(uploadedImages)
+  const unifiedHistoryRef = useRef<UnifiedHistoryItem[]>([])
+  const unifiedHistoryIndexRef = useRef(-1)
+  const pendingCanvasHistoryRef = useRef(false)
   const compositeCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const composeIdRef = useRef(0)
   const imageCacheRef = useRef<Record<string, HTMLImageElement>>({})
@@ -115,10 +135,28 @@ export default function PersonalizadorPage() {
     document.title = "Dark Lion - Personalizador 3D"
   }, [])
 
+  const normalizeUnifiedHistoryItem = useCallback((item?: Partial<UnifiedHistoryItem> | null): UnifiedHistoryItem => {
+    return {
+      partColors: { ...DEFAULT_PART_COLORS, ...(item?.partColors ?? {}) },
+      viewObjects: { ...(item?.viewObjects ?? {}) },
+      viewContent: { ...(item?.viewContent ?? {}) },
+      uploadedImages: Array.isArray(item?.uploadedImages) ? [...item.uploadedImages] : [],
+    }
+  }, [])
+
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY)
       if (!raw) {
+        const initialHistory: UnifiedHistoryItem = {
+          partColors: { ...DEFAULT_PART_COLORS },
+          viewObjects: {},
+          viewContent: {},
+          uploadedImages: [],
+        }
+        unifiedHistoryRef.current = [initialHistory]
+        unifiedHistoryIndexRef.current = 0
+        setInitialViewObjects({})
         setIsPersistenceReady(true)
         return
       }
@@ -134,6 +172,7 @@ export default function PersonalizadorPage() {
 
       if (Array.isArray(parsed.uploadedImages)) {
         setUploadedImages(parsed.uploadedImages)
+        uploadedImagesRef.current = parsed.uploadedImages
       }
 
       if (parsed.viewObjects && typeof parsed.viewObjects === "object") {
@@ -144,12 +183,58 @@ export default function PersonalizadorPage() {
       if (parsed.viewContent && typeof parsed.viewContent === "object") {
         viewContentRef.current = parsed.viewContent
       }
+
+      if (parsed.unifiedHistory && Array.isArray(parsed.unifiedHistory.stack) && parsed.unifiedHistory.stack.length > 0) {
+        const boundedIndex = Math.max(0, Math.min(parsed.unifiedHistory.index ?? 0, parsed.unifiedHistory.stack.length - 1))
+        const snapshot = parsed.unifiedHistory.stack[boundedIndex]
+        unifiedHistoryRef.current = parsed.unifiedHistory.stack.map((item) => normalizeUnifiedHistoryItem(item))
+        unifiedHistoryIndexRef.current = boundedIndex
+        if (snapshot) {
+          const normalizedSnapshot = normalizeUnifiedHistoryItem(snapshot)
+          const nextPartColors = normalizedSnapshot.partColors
+          const nextViewObjects = normalizedSnapshot.viewObjects
+          const nextViewContent = normalizedSnapshot.viewContent
+          const nextUploadedImages = normalizedSnapshot.uploadedImages
+
+          partColorsRef.current = nextPartColors
+          viewObjectsRef.current = nextViewObjects
+          viewContentRef.current = nextViewContent
+          uploadedImagesRef.current = nextUploadedImages
+
+          setPartColors(nextPartColors)
+          setInitialViewObjects(nextViewObjects)
+          setUploadedImages(nextUploadedImages)
+        }
+      } else {
+        const nextPartColors = { ...DEFAULT_PART_COLORS, ...(parsed.partColors ?? {}) }
+        const nextViewObjects = parsed.viewObjects ?? {}
+        const nextViewContent = parsed.viewContent ?? {}
+        const nextUploadedImages = parsed.uploadedImages ?? []
+
+        partColorsRef.current = nextPartColors
+        viewObjectsRef.current = nextViewObjects
+        viewContentRef.current = nextViewContent
+        uploadedImagesRef.current = nextUploadedImages
+
+        unifiedHistoryRef.current = [{
+          partColors: nextPartColors,
+          viewObjects: nextViewObjects,
+          viewContent: nextViewContent,
+          uploadedImages: nextUploadedImages,
+        }]
+        unifiedHistoryIndexRef.current = 0
+
+        setPartColors(nextPartColors)
+        setInitialViewObjects(nextViewObjects)
+        setUploadedImages(nextUploadedImages)
+      }
     } catch {
       // ignore invalid saved state
     } finally {
       setIsPersistenceReady(true)
+      setUnifiedHistoryTick((tick) => tick + 1)
     }
-  }, [])
+  }, [normalizeUnifiedHistoryItem])
 
   useEffect(() => {
     if (!isPersistenceReady) return
@@ -309,12 +394,91 @@ export default function PersonalizadorPage() {
     } else {
       delete viewObjectsRef.current[view]
     }
+    setInitialViewObjects({ ...viewObjectsRef.current })
     setPersistTick((tick) => tick + 1)
   }, [])
 
+  const createUnifiedHistorySnapshot = useCallback((overrides?: Partial<UnifiedHistoryItem>): UnifiedHistoryItem => {
+    return normalizeUnifiedHistoryItem({
+      partColors: overrides?.partColors ?? partColorsRef.current,
+      viewObjects: overrides?.viewObjects ?? viewObjectsRef.current,
+      viewContent: overrides?.viewContent ?? viewContentRef.current,
+      uploadedImages: overrides?.uploadedImages ?? uploadedImagesRef.current,
+    })
+  }, [normalizeUnifiedHistoryItem])
+
+  const recordUnifiedHistory = useCallback((overrides?: Partial<UnifiedHistoryItem>) => {
+    const nextSnapshot = createUnifiedHistorySnapshot(overrides)
+    const currentSnapshot = unifiedHistoryRef.current[unifiedHistoryIndexRef.current]
+    if (currentSnapshot && JSON.stringify(currentSnapshot) === JSON.stringify(nextSnapshot)) {
+      return
+    }
+
+    const nextHistory = unifiedHistoryRef.current.slice(0, unifiedHistoryIndexRef.current + 1)
+    nextHistory.push(nextSnapshot)
+    unifiedHistoryRef.current = nextHistory
+    unifiedHistoryIndexRef.current = nextHistory.length - 1
+    setUnifiedHistoryTick((tick) => tick + 1)
+  }, [createUnifiedHistorySnapshot])
+
+  const applyUnifiedHistorySnapshot = useCallback((snapshot: UnifiedHistoryItem) => {
+    const normalizedSnapshot = normalizeUnifiedHistoryItem(snapshot)
+    const nextPartColors = normalizedSnapshot.partColors
+    const nextViewObjects = normalizedSnapshot.viewObjects
+    const nextViewContent = normalizedSnapshot.viewContent
+    const nextUploadedImages = normalizedSnapshot.uploadedImages
+
+    partColorsRef.current = nextPartColors
+    viewObjectsRef.current = nextViewObjects
+    viewContentRef.current = nextViewContent
+    uploadedImagesRef.current = nextUploadedImages
+
+    setPartColors(nextPartColors)
+    setUploadedImages(nextUploadedImages)
+    setInitialViewObjects(nextViewObjects)
+    setPersistTick((tick) => tick + 1)
+    setFabricEditorRevision((revision) => revision + 1)
+    setUnifiedHistoryTick((tick) => tick + 1)
+    composeUVTexture()
+  }, [composeUVTexture, normalizeUnifiedHistoryItem])
+
+  const scheduleCanvasHistoryRecord = useCallback(() => {
+    if (pendingCanvasHistoryRef.current) return
+    pendingCanvasHistoryRef.current = true
+    queueMicrotask(() => {
+      pendingCanvasHistoryRef.current = false
+      recordUnifiedHistory()
+    })
+  }, [recordUnifiedHistory])
+
   const handlePartColorChange = useCallback((part: keyof PartColors, color: string) => {
-    setPartColors((prev) => ({ ...prev, [part]: color }))
-  }, [])
+    setPartColors((prev) => {
+      if (prev[part] === color) return prev
+      const next = { ...prev, [part]: color }
+      partColorsRef.current = next
+      recordUnifiedHistory({ partColors: next })
+      return next
+    })
+  }, [recordUnifiedHistory])
+
+  const handleUnifiedUndo = useCallback(() => {
+    if (unifiedHistoryIndexRef.current <= 0) return
+    unifiedHistoryIndexRef.current -= 1
+    const snapshot = unifiedHistoryRef.current[unifiedHistoryIndexRef.current]
+    if (!snapshot) return
+    applyUnifiedHistorySnapshot(snapshot)
+  }, [applyUnifiedHistorySnapshot])
+
+  const handleUnifiedRedo = useCallback(() => {
+    if (unifiedHistoryIndexRef.current >= unifiedHistoryRef.current.length - 1) return
+    unifiedHistoryIndexRef.current += 1
+    const snapshot = unifiedHistoryRef.current[unifiedHistoryIndexRef.current]
+    if (!snapshot) return
+    applyUnifiedHistorySnapshot(snapshot)
+  }, [applyUnifiedHistorySnapshot])
+
+  const canUnifiedUndo = unifiedHistoryIndexRef.current > 0
+  const canUnifiedRedo = unifiedHistoryIndexRef.current < unifiedHistoryRef.current.length - 1
 
   useEffect(() => {
     partColorsRef.current = partColors
@@ -349,6 +513,10 @@ export default function PersonalizadorPage() {
   }, [partColors])
 
   useEffect(() => {
+    uploadedImagesRef.current = uploadedImages
+  }, [uploadedImages])
+
+  useEffect(() => {
     if (!isPersistenceReady) return
     
     // Generate initial texture after persistence is ready
@@ -365,12 +533,16 @@ export default function PersonalizadorPage() {
         uploadedImages,
         viewObjects: viewObjectsRef.current,
         viewContent: viewContentRef.current,
+        unifiedHistory: {
+          stack: unifiedHistoryRef.current,
+          index: unifiedHistoryIndexRef.current,
+        },
       }
       localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
     } catch {
       // ignore quota/storage errors
     }
-  }, [isPersistenceReady, activeView, partColors, uploadedImages, persistTick])
+  }, [isPersistenceReady, activeView, partColors, uploadedImages, persistTick, unifiedHistoryTick])
 
   const addImageToCanvas = useCallback(async (dataUrl: string) => {
     const fabricModule = await import("fabric")
@@ -415,7 +587,10 @@ export default function PersonalizadorPage() {
     const canvas = fabricCanvasRef.current
     if (!canvas) return
 
-    const itext = new fabricModule.IText(text, {
+    const finalText = text.slice(0, MAX_TEXT_LENGTH)
+    if (!finalText.trim()) return
+
+    const itext = new fabricModule.IText(finalText, {
       left: 100,
       top: 140,
       fontSize: 28,
@@ -482,7 +657,18 @@ export default function PersonalizadorPage() {
     setCanvasDataUrl(undefined)
     viewContentRef.current = {}
     viewObjectsRef.current = {}
+    uploadedImagesRef.current = []
+    unifiedHistoryRef.current = [{
+      partColors: { ...DEFAULT_PART_COLORS },
+      viewObjects: {},
+      viewContent: {},
+      uploadedImages: [],
+    }]
+    unifiedHistoryIndexRef.current = 0
+    pendingCanvasHistoryRef.current = false
+    setUnifiedHistoryTick((tick) => tick + 1)
     setInitialViewObjects({})
+    setFabricEditorRevision((revision) => revision + 1)
     setShowResetConfirm(false)
 
     try {
@@ -538,11 +724,17 @@ export default function PersonalizadorPage() {
             <div className="relative flex flex-1 flex-col overflow-hidden">
               {isPersistenceReady ? (
                 <FabricEditor
+                  key={fabricEditorRevision}
                   activeView={activeView}
                   onCanvasReady={handleCanvasReady}
                   onCanvasUpdate={handleCanvasUpdate}
                   initialViewObjects={initialViewObjects}
                   onViewObjectsChange={handleViewObjectsChange}
+                  onGlobalUndo={handleUnifiedUndo}
+                  onGlobalRedo={handleUnifiedRedo}
+                  canGlobalUndo={canUnifiedUndo}
+                  canGlobalRedo={canUnifiedRedo}
+                  onCanvasStateChange={scheduleCanvasHistoryRecord}
                 />
               ) : (
                 <div className="flex h-full w-full items-center justify-center">

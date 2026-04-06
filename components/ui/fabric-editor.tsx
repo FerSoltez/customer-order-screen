@@ -41,6 +41,14 @@ const templateRenderConfig: Record<string, { scale: number; offsetX: number; off
 }
 
 const MANGAS_INTRO_KEY = "darklion-personalizador-mangas-intro-v1"
+const HISTORY_STORAGE_KEY = "darklion-personalizador-history-v1"
+
+interface PersistedHistoryItem {
+  stack: string[]
+  index: number
+}
+
+type PersistedHistoryMap = Record<string, PersistedHistoryItem>
 
 interface FabricEditorProps {
   activeView: TemplateView
@@ -49,9 +57,14 @@ interface FabricEditorProps {
   onCanvasUpdate?: (view: string, userContentDataUrl: string) => void
   initialViewObjects?: Record<string, string>
   onViewObjectsChange?: (view: string, serializedObjects: string | null) => void
+  onGlobalUndo?: () => void
+  onGlobalRedo?: () => void
+  canGlobalUndo?: boolean
+  canGlobalRedo?: boolean
+  onCanvasStateChange?: () => void
 }
 
-export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initialViewObjects, onViewObjectsChange }: FabricEditorProps) {
+export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initialViewObjects, onViewObjectsChange, onGlobalUndo, onGlobalRedo, canGlobalUndo = false, canGlobalRedo = false, onCanvasStateChange }: FabricEditorProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const canvasRef2 = useRef<HTMLCanvasElement>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -79,6 +92,35 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
   const isMangas = activeView === "mangas"
   const primaryMangaKey = "manga_derecha"
   const secondaryMangaKey = "manga_izquierda"
+  const currentHistoryKey = isMangas ? primaryMangaKey : activeView
+
+  const saveHistorySnapshot = useCallback((key: string) => {
+    try {
+      const raw = localStorage.getItem(HISTORY_STORAGE_KEY)
+      const parsed = raw ? (JSON.parse(raw) as PersistedHistoryMap) : {}
+      parsed[key] = {
+        stack: [...historyRef.current],
+        index: historyIndexRef.current,
+      }
+      localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(parsed))
+    } catch {
+      // ignore storage errors
+    }
+  }, [])
+
+  const loadHistorySnapshot = useCallback((key: string): PersistedHistoryItem | null => {
+    try {
+      const raw = localStorage.getItem(HISTORY_STORAGE_KEY)
+      if (!raw) return null
+      const parsed = JSON.parse(raw) as PersistedHistoryMap
+      const item = parsed[key]
+      if (!item || !Array.isArray(item.stack)) return null
+      const boundedIndex = Math.max(0, Math.min(item.index ?? 0, item.stack.length - 1))
+      return { stack: item.stack, index: boundedIndex }
+    } catch {
+      return null
+    }
+  }, [])
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const persistCanvasState = useCallback((canvas: any, saveKey: string, allowEmpty = false) => {
@@ -258,11 +300,12 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
       historyRef.current = historyRef.current.slice(0, historyIndexRef.current + 1)
       historyRef.current.push(json)
       historyIndexRef.current = historyRef.current.length - 1
+      saveHistorySnapshot(currentHistoryKey)
       setHistoryState((s) => s + 1)
     } catch {
       // ignore
     }
-  }, [])
+  }, [currentHistoryKey, saveHistorySnapshot])
 
   const initSingleCanvas = useCallback(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -795,10 +838,17 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
 
     isLoadingRef.current = false
 
-    // Save initial history
-    historyRef.current = []
-    historyIndexRef.current = -1
-    saveToHistory()
+    // Restore history if available (survives browser refresh), otherwise create initial history from current canvas state.
+    const persistedHistory = loadHistorySnapshot(currentHistoryKey)
+    if (persistedHistory && persistedHistory.stack.length > 0) {
+      historyRef.current = persistedHistory.stack
+      historyIndexRef.current = persistedHistory.index
+      setHistoryState((s) => s + 1)
+    } else {
+      historyRef.current = []
+      historyIndexRef.current = -1
+      saveToHistory()
+    }
     
     // Call notifyUpdate immediately after objects are restored
     // Use Promise.resolve().then() for micro-task queue (executes before RAF/macrotasks)
@@ -832,6 +882,7 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
           persistCanvasState(fabricRef.current, saveKey, evt === "object:removed")
           saveToHistory()
           notifyUpdate()
+          onCanvasStateChange?.()
         }
       })
     })
@@ -841,7 +892,9 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
         fabricRef2.current?.on(evt, () => {
           if (!isLoadingRef.current) {
             persistCanvasState(fabricRef2.current, secondaryMangaKey, evt === "object:removed")
+            saveToHistory()
             notifyUpdate()
+            onCanvasStateChange?.()
           }
         })
       })
@@ -913,11 +966,12 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
       const saveKey = isMangas ? primaryMangaKey : activeView
       persistCanvasState(fabricRef.current, saveKey, true)
       notifyUpdate(true)
+      saveHistorySnapshot(saveKey)
       setHistoryState((s) => s + 1)
       historyBusyRef.current = false
       setIsHistoryBusy(false)
     }
-  }, [activeView, isMangas, notifyUpdate, persistCanvasState])
+  }, [activeView, isMangas, notifyUpdate, persistCanvasState, primaryMangaKey, saveHistorySnapshot])
 
   const handleRedo = useCallback(async () => {
     if (!fabricRef.current || !fabricModuleRef.current || historyIndexRef.current >= historyRef.current.length - 1 || historyBusyRef.current) return
@@ -948,11 +1002,15 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
       const saveKey = isMangas ? primaryMangaKey : activeView
       persistCanvasState(fabricRef.current, saveKey, true)
       notifyUpdate(true)
+      saveHistorySnapshot(saveKey)
       setHistoryState((s) => s + 1)
       historyBusyRef.current = false
       setIsHistoryBusy(false)
     }
-  }, [activeView, isMangas, notifyUpdate, persistCanvasState])
+  }, [activeView, isMangas, notifyUpdate, persistCanvasState, primaryMangaKey, saveHistorySnapshot])
+
+  const canUndo = !isHistoryBusy && historyIndexRef.current > 0
+  const canRedo = !isHistoryBusy && historyIndexRef.current < historyRef.current.length - 1
 
   // Keyboard shortcuts: Ctrl+Z / Ctrl+Y
   useEffect(() => {
@@ -960,19 +1018,32 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
       if (historyBusyRef.current) return
       if ((e.ctrlKey || e.metaKey) && e.key === "z") {
         e.preventDefault()
-        handleUndo()
+        if (canGlobalUndo) {
+          onGlobalUndo?.()
+        }
       }
       if ((e.ctrlKey || e.metaKey) && e.key === "y") {
         e.preventDefault()
-        handleRedo()
+        if (canGlobalRedo) {
+          onGlobalRedo?.()
+        }
       }
     }
     document.addEventListener("keydown", handleGlobalKey)
     return () => document.removeEventListener("keydown", handleGlobalKey)
-  }, [handleUndo, handleRedo])
+  }, [canGlobalRedo, canGlobalUndo, canRedo, canUndo, handleRedo, handleUndo, onGlobalRedo, onGlobalUndo])
 
-  const canUndo = !isHistoryBusy && historyIndexRef.current > 0
-  const canRedo = !isHistoryBusy && historyIndexRef.current < historyRef.current.length - 1
+  const handleUndoAction = useCallback(() => {
+    if (canGlobalUndo) {
+      onGlobalUndo?.()
+    }
+  }, [canGlobalUndo, onGlobalUndo])
+
+  const handleRedoAction = useCallback(() => {
+    if (canGlobalRedo) {
+      onGlobalRedo?.()
+    }
+  }, [canGlobalRedo, onGlobalRedo])
 
   const handleCloseMangasIntro = useCallback(() => {
     setShowMangasIntro(false)
@@ -1007,8 +1078,8 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
       {/* Bottom bar: undo/redo on the far left */}
       <div className="flex items-center gap-1.5 px-3 py-1.5">
         <button
-          onClick={handleUndo}
-          disabled={!canUndo}
+          onClick={handleUndoAction}
+          disabled={!canGlobalUndo}
           className="flex h-8 w-8 items-center justify-center rounded-full border border-foreground/30 bg-card text-foreground transition-colors hover:bg-secondary disabled:opacity-30"
           title="Deshacer (Ctrl+Z)"
           aria-label="Deshacer"
@@ -1016,8 +1087,8 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
           <Undo2 className="h-3.5 w-3.5" />
         </button>
         <button
-          onClick={handleRedo}
-          disabled={!canRedo}
+          onClick={handleRedoAction}
+          disabled={!canGlobalRedo}
           className="flex h-8 w-8 items-center justify-center rounded-full border border-foreground/30 bg-card text-foreground transition-colors hover:bg-secondary disabled:opacity-30"
           title="Rehacer (Ctrl+Y)"
           aria-label="Rehacer"
