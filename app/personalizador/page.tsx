@@ -115,6 +115,7 @@ export default function PersonalizadorPage() {
   const [showSaveConfirm, setShowSaveConfirm] = useState(false)
   const [showIntroModal, setShowIntroModal] = useState(false)
   const [unifiedHistoryTick, setUnifiedHistoryTick] = useState(0)
+  const [fabricEditorRestoreRevision, setFabricEditorRestoreRevision] = useState(0)
   const [fabricEditorRevision, setFabricEditorRevision] = useState(0)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fabricCanvasRef = useRef<any>(null)
@@ -441,7 +442,7 @@ export default function PersonalizadorPage() {
     setUploadedImages(nextUploadedImages)
     setInitialViewObjects(nextViewObjects)
     setPersistTick((tick) => tick + 1)
-    setFabricEditorRevision((revision) => revision + 1)
+    setFabricEditorRestoreRevision((revision) => revision + 1)
     setUnifiedHistoryTick((tick) => tick + 1)
     composeUVTexture()
   }, [composeUVTexture, normalizeUnifiedHistoryItem])
@@ -730,6 +731,7 @@ export default function PersonalizadorPage() {
                 <FabricEditor
                   key={fabricEditorRevision}
                   activeView={activeView}
+                  restoreRevision={fabricEditorRestoreRevision}
                   onCanvasReady={handleCanvasReady}
                   onCanvasUpdate={handleCanvasUpdate}
                   initialViewObjects={initialViewObjects}
@@ -871,7 +873,7 @@ export default function PersonalizadorPage() {
               <AlertTriangle className="h-8 w-8 text-orange-600" />
             </div>
             <AlertDialogHeader className="text-center">
-              <AlertDialogTitle className="text-xl font-bold text-foreground">¿Deseas cancelar sin guardar?</AlertDialogTitle>
+              <AlertDialogTitle className="text-xl font-bold text-foreground">¿Deseas salir sin guardar?</AlertDialogTitle>
               <AlertDialogDescription className="mt-2 text-sm text-muted-foreground">
                 Los cambios que hayas realizado en esta sesión <span className="font-semibold text-foreground">no serán guardados</span>.
               </AlertDialogDescription>
@@ -885,7 +887,7 @@ export default function PersonalizadorPage() {
               }}
               className="bg-orange-600 hover:bg-orange-700 text-white rounded-lg py-2.5 font-semibold"
             >
-              Cancelar Sin Guardar
+              Salir sin guardar
             </AlertDialogAction>
             <AlertDialogCancel className="text-gray-600 hover:text-gray-700 rounded-lg py-2.5 font-semibold border-0">
               Volver al Editor

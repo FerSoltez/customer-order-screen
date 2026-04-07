@@ -44,6 +44,34 @@ const MANGAS_INTRO_KEY = "darklion-personalizador-mangas-intro-v1"
 const HISTORY_STORAGE_KEY = "darklion-personalizador-history-v1"
 const FABRIC_EXPORT_TARGET_SIZE = 2048
 
+const isCanvasImageSource = (value: unknown): value is CanvasImageSource => {
+  if (!value) return false
+  if (typeof HTMLCanvasElement !== "undefined" && value instanceof HTMLCanvasElement) return true
+  if (typeof HTMLImageElement !== "undefined" && value instanceof HTMLImageElement) return true
+  if (typeof SVGImageElement !== "undefined" && value instanceof SVGImageElement) return true
+  if (typeof HTMLVideoElement !== "undefined" && value instanceof HTMLVideoElement) return true
+  if (typeof ImageBitmap !== "undefined" && value instanceof ImageBitmap) return true
+  if (typeof OffscreenCanvas !== "undefined" && value instanceof OffscreenCanvas) return true
+  // VideoFrame is not available in all browsers.
+  if (typeof VideoFrame !== "undefined" && value instanceof VideoFrame) return true
+  return false
+}
+
+const createTransparentPng = (width: number, height: number): string | null => {
+  try {
+    const safeW = Math.max(1, Math.floor(width || 1))
+    const safeH = Math.max(1, Math.floor(height || 1))
+    const fallback = document.createElement("canvas")
+    fallback.width = safeW
+    fallback.height = safeH
+    const fallbackCtx = fallback.getContext("2d", { alpha: true })
+    fallbackCtx?.clearRect(0, 0, safeW, safeH)
+    return fallback.toDataURL("image/png")
+  } catch {
+    return null
+  }
+}
+
 interface PersistedHistoryItem {
   stack: string[]
   index: number
@@ -53,6 +81,7 @@ type PersistedHistoryMap = Record<string, PersistedHistoryItem>
 
 interface FabricEditorProps {
   activeView: TemplateView
+  restoreRevision?: number
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   onCanvasReady?: (canvas: any) => void
   onCanvasUpdate?: (view: string, userContentDataUrl: string) => void
@@ -65,7 +94,7 @@ interface FabricEditorProps {
   onCanvasStateChange?: () => void
 }
 
-export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initialViewObjects, onViewObjectsChange, onGlobalUndo, onGlobalRedo, canGlobalUndo = false, canGlobalRedo = false, onCanvasStateChange }: FabricEditorProps) {
+export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, onCanvasUpdate, initialViewObjects, onViewObjectsChange, onGlobalUndo, onGlobalRedo, canGlobalUndo = false, canGlobalRedo = false, onCanvasStateChange }: FabricEditorProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const canvasRef2 = useRef<HTMLCanvasElement>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -94,6 +123,66 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
   const primaryMangaKey = "manga_derecha"
   const secondaryMangaKey = "manga_izquierda"
   const currentHistoryKey = isMangas ? primaryMangaKey : activeView
+
+  const configureImageObject = useCallback((obj: any) => {
+    if (!obj || obj.type !== "image") return
+    obj.set({
+      lockUniScaling: false,
+      lockScalingFlip: true,
+      lockSkewingX: true,
+      lockSkewingY: true,
+    })
+    obj.setControlsVisibility?.({
+      mt: true,
+      mb: true,
+      ml: true,
+      mr: true,
+      mtr: true,
+      tl: true,
+      tr: true,
+      bl: true,
+      br: true,
+    })
+  }, [])
+
+  const enforceMinimumSize = useCallback((obj: any, zoneReference?: { width: number; height: number }) => {
+    if (!obj) return
+    const MIN_IMAGE_SIZE = 30 // pixels
+    const MIN_TEXT_SIZE = 14 // font size in pixels
+    const MIN_ZONE_PERCENTAGE = 0.1 // 10% of zone
+
+    obj.setCoords()
+    const bounds = obj.getBoundingRect(true, true)
+    if (!bounds) return
+
+    if (obj.type === "image") {
+      let minW = MIN_IMAGE_SIZE
+      let minH = MIN_IMAGE_SIZE
+      if (zoneReference) {
+        minW = Math.max(MIN_IMAGE_SIZE, zoneReference.width * MIN_ZONE_PERCENTAGE)
+        minH = Math.max(MIN_IMAGE_SIZE, zoneReference.height * MIN_ZONE_PERCENTAGE)
+      }
+      let nextScaleX = obj.scaleX || 1
+      let nextScaleY = obj.scaleY || 1
+
+      if (bounds.width < minW) {
+        nextScaleX = nextScaleX * (minW / Math.max(1, bounds.width))
+      }
+      if (bounds.height < minH) {
+        nextScaleY = nextScaleY * (minH / Math.max(1, bounds.height))
+      }
+
+      if (nextScaleX !== (obj.scaleX || 1) || nextScaleY !== (obj.scaleY || 1)) {
+        obj.set({ scaleX: nextScaleX, scaleY: nextScaleY })
+      }
+    } else if (obj.type === "i-text" || obj.type === "text") {
+      const currentFontSize = obj.fontSize || 14
+      if (currentFontSize < MIN_TEXT_SIZE) {
+        obj.set({ fontSize: MIN_TEXT_SIZE })
+      }
+    }
+    obj.setCoords()
+  }, [])
 
   const saveHistorySnapshot = useCallback((key: string) => {
     try {
@@ -184,59 +273,42 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
       const scaledW = Math.max(1, Math.round(cw * exportMultiplier))
       const scaledH = Math.max(1, Math.round(ch * exportMultiplier))
 
-      // Temporarily hide background/zones to get user-only content with transparency
+      // Export only user content: never include template background or zones.
+      let userCanvas: CanvasImageSource | null = null
       const origBg = canvas.backgroundColor
       const origBgImage = canvas.backgroundImage
-      canvas.backgroundColor = null
-      canvas.backgroundImage = null
-
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const hidden: any[] = []
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      canvas.getObjects().forEach((obj: any) => {
-        if (obj._isZone) {
-          obj.visible = false
-          hidden.push(obj)
-        }
-      })
-      canvas.renderAll()
-
-      // Get canvas element with user content (now without background)
-      let userCanvas: HTMLCanvasElement
+      const hiddenZones: any[] = []
       try {
-        userCanvas = canvas.toCanvasElement?.(exportMultiplier) || canvas.getElement?.() || canvas.lowerCanvasEl
-        if (!userCanvas) {
-          // Fallback: create a new canvas and render to it
-          userCanvas = document.createElement("canvas")
-          userCanvas.width = scaledW
-          userCanvas.height = scaledH
-          const ctx = userCanvas.getContext("2d")
-          if (ctx) {
-            const imageData = canvas.getImageData?.()
-            if (imageData) {
-              const tmp = document.createElement("canvas")
-              tmp.width = cw
-              tmp.height = ch
-              const tmpCtx = tmp.getContext("2d")
-              if (tmpCtx) {
-                tmpCtx.putImageData(imageData, 0, 0)
-                ctx.imageSmoothingEnabled = true
-                ctx.imageSmoothingQuality = "high"
-                ctx.drawImage(tmp, 0, 0, scaledW, scaledH)
-              }
-            }
+        canvas.backgroundColor = null
+        canvas.backgroundImage = null
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        canvas.getObjects().forEach((obj: any) => {
+          if (obj?._isZone && obj.visible) {
+            obj.visible = false
+            hiddenZones.push(obj)
           }
-        }
-      } catch (e) {
-        userCanvas = canvas.lowerCanvasEl
-      }
+        })
 
-      // Restore original canvas state
-      canvas.backgroundColor = origBg
-      canvas.backgroundImage = origBgImage
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      hidden.forEach((o: any) => { o.visible = true })
-      canvas.renderAll()
+        const candidate = canvas.toCanvasElement?.(exportMultiplier, {
+          withoutBackground: true,
+          withoutOverlay: true,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          filter: (obj: any) => !obj?._isZone,
+        })
+        if (isCanvasImageSource(candidate)) {
+          userCanvas = candidate
+        }
+      } catch {
+        userCanvas = null
+      } finally {
+        canvas.backgroundColor = origBg
+        canvas.backgroundImage = origBgImage
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        hiddenZones.forEach((obj: any) => {
+          obj.visible = true
+        })
+      }
 
       // Build clipped output: only zone regions are visible in 3D
       const vk = viewKey || activeView
@@ -250,9 +322,12 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
       if (!ctx) {
         // Fallback: return user canvas directly if we can't clip to zones
         try {
-          return userCanvas.toDataURL("image/png")
+          if (userCanvas && userCanvas instanceof HTMLCanvasElement) {
+            return userCanvas.toDataURL("image/png")
+          }
+          return createTransparentPng(scaledW, scaledH)
         } catch {
-          return null
+          return createTransparentPng(scaledW, scaledH)
         }
       }
 
@@ -268,10 +343,14 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
           const sy = z.y * scaledH
           const sw = z.w * scaledW
           const sh = z.h * scaledH
+          if (!userCanvas) continue
           ctx.drawImage(userCanvas, sx, sy, sw, sh, sx, sy, sw, sh)
         }
       } else {
         // If no zones, draw entire user canvas
+        if (!userCanvas) {
+          return createTransparentPng(scaledW, scaledH)
+        }
         ctx.drawImage(userCanvas, 0, 0, scaledW, scaledH)
       }
 
@@ -281,7 +360,9 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
       return pngData
     } catch (e) {
       console.error("exportUserContent failed:", e)
-      return null
+      const fallbackW = Math.max(1, Math.round((canvas?.width || 1)))
+      const fallbackH = Math.max(1, Math.round((canvas?.height || 1)))
+      return createTransparentPng(fallbackW, fallbackH)
     }
   }, [activeView])
 
@@ -303,6 +384,56 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
       }
     }
   }, [onCanvasUpdate, isMangas, activeView, exportUserContent, hasUserObjects])
+
+  useEffect(() => {
+    if (!fabricModuleRef.current || isLoadingRef.current) return
+
+    const restore = async () => {
+      isLoadingRef.current = true
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const restoreForCanvas = async (targetCanvas: any, stateKey: string) => {
+          if (!targetCanvas) return
+
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const toRemove = targetCanvas.getObjects().filter((o: any) => !o._isZone)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          toRemove.forEach((o: any) => targetCanvas.remove(o))
+
+          const saved = savedStatesRef.current[stateKey]
+          if (saved) {
+            const objsData = JSON.parse(saved)
+            if (Array.isArray(objsData) && objsData.length > 0) {
+              const restored = await fabricModuleRef.current.util.enlivenObjects(objsData)
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              restored.forEach((obj: any) => {
+                configureImageObject(obj)
+                enforceMinimumSize(obj)
+                obj._autoFitted = true
+                targetCanvas.add(obj)
+              })
+            }
+          }
+
+          targetCanvas.renderAll()
+        }
+
+        if (isMangas) {
+          await restoreForCanvas(fabricRef.current, primaryMangaKey)
+          await restoreForCanvas(fabricRef2.current, secondaryMangaKey)
+        } else {
+          await restoreForCanvas(fabricRef.current, activeView)
+        }
+      } catch {
+        // ignore restore errors
+      } finally {
+        isLoadingRef.current = false
+        notifyUpdate(true)
+      }
+    }
+
+    void restore()
+  }, [activeView, isMangas, notifyUpdate, primaryMangaKey, restoreRevision, secondaryMangaKey])
 
   const saveToHistory = useCallback(() => {
     if (!fabricRef.current || isLoadingRef.current) return
@@ -577,6 +708,7 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
         const zH = z.h * canvasHeight
         // Auto-scale images to fit zone
         if (obj.type === "image") {
+          configureImageObject(obj)
           const s = Math.min(zW / (obj.width || 1), zH / (obj.height || 1)) * 0.9
           obj.set({ scaleX: s, scaleY: s })
         } else {
@@ -596,34 +728,19 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
         })
         obj._autoFitted = true
         obj.setCoords()
+        enforceMinimumSize(obj, { width: zW, height: zH })
         clampObjectInsideZones(obj)
       })
 
-      let lastClampTime = 0
-      const clampThrottle = (obj: any) => {
-        const now = Date.now()
-        if (now - lastClampTime > 16) { // ~60fps throttle
-          lastClampTime = now
-          clampObjectInsideZones(obj)
+      canvas.on("object:modified", (e: { target?: any }) => {
+        const obj = e.target
+        if (!obj || obj._isZone) return
+        if (obj.type === "image") {
+          configureImageObject(obj)
         }
-      }
-
-      canvas.on("object:moving", (e: { target?: any }) => {
-        const obj = e.target
-        if (!obj || obj._isZone) return
-        clampThrottle(obj)
-      })
-
-      canvas.on("object:scaling", (e: { target?: any }) => {
-        const obj = e.target
-        if (!obj || obj._isZone) return
-        clampThrottle(obj)
-      })
-
-      canvas.on("object:rotating", (e: { target?: any }) => {
-        const obj = e.target
-        if (!obj || obj._isZone) return
-        clampThrottle(obj)
+        enforceMinimumSize(obj)
+        clampObjectInsideZones(obj)
+        canvas.requestRenderAll()
       })
 
       const pasteFromClipboard = async () => {
@@ -667,6 +784,7 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
                   scaleX: scale,
                   scaleY: scale,
                 })
+                configureImageObject(imageObj)
                 canvas.add(imageObj)
                 canvas.setActiveObject(imageObj)
                 clampObjectInsideZones(imageObj)
@@ -971,6 +1089,7 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         restored.forEach((o: any) => {
           o._autoFitted = true
+          enforceMinimumSize(o)
           fabricRef.current.add(o)
         })
       }
@@ -1007,6 +1126,7 @@ export function FabricEditor({ activeView, onCanvasReady, onCanvasUpdate, initia
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         restored.forEach((o: any) => {
           o._autoFitted = true
+          enforceMinimumSize(o)
           fabricRef.current.add(o)
         })
       }
