@@ -34,7 +34,8 @@ interface UploadedImage {
   dataUrl: string
 }
 
-// UV positions on the composite texture (normalized 0-1, from Blender UV map)
+// UV regions on the composite texture (normalized 0-1, from Blender UV map).
+// These control how part colors and texture content land on the 3D model.
 const UV_REGIONS: Record<string, { x: number; y: number; w: number; h: number }> = {
   frente:          { x: 0.0000, y: 0.1172, w: 0.50, h: 0.6527 },
   espalda:         { x: 0.50, y: 0.1172, w: 0.45, h: 0.7227 },
@@ -42,6 +43,7 @@ const UV_REGIONS: Record<string, { x: number; y: number; w: number; h: number }>
   manga_derecha:   { x: 0.50, y: 0.8008, w: 0.40, h: 0.1592 },
 }
 
+// Neck color regions are also part of the 3D texture projection.
 const NECK_REGIONS = {
   neck_front: { x: 0.100, y: 0.0586, w: 0.5044, h: 0.0195 },
   neck_back:  { x: 0.6250, y: 0.0586, w: 0.2344, h: 0.0195 },

@@ -5,9 +5,10 @@ import { Undo2, Redo2 } from "lucide-react"
 import { AlertDialog, AlertDialogAction, AlertDialogContent, AlertDialogDescription, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import type { TemplateView } from "./template-selector"
 
-// Zone definitions per template view (relative coords 0-1)
+// Image/text placement zones per template view (relative coords 0-1).
+// These are independent from the 3D UV regions in app/personalizador/page.tsx.
 // To adjust a zone: x = left edge, y = top edge, w = width, h = height (all 0-1)
-const zoneConfigs: Record<string, { x: number; y: number; w: number; h: number }[]> = {
+const imagePlacementZones: Record<string, { x: number; y: number; w: number; h: number }[]> = {
   frente: [
     { x: 0.20, y: 0.22, w: 0.22, h: 0.10 },   // Pecho Derecho (top-left)
     { x: 0.56, y: 0.22, w: 0.22, h: 0.10 },   // Escudo Pecho Izquierdo (top-right)
@@ -17,6 +18,28 @@ const zoneConfigs: Record<string, { x: number; y: number; w: number; h: number }
   espalda: [
     { x: 0.32, y: 0.14, w: 0.40, h: 0.08 },   // Zona 6 - Nombre (top)
     { x: 0.32, y: 0.55, w: 0.40, h: 0.08 },   // Zona 7 - Número (center)
+  ],
+  manga_izquierda: [
+    { x: 0.18, y: 0.40, w: 0.64, h: 0.25 },
+  ],
+  manga_derecha: [
+    { x: 0.18, y: 0.40, w: 0.64, h: 0.25 },
+  ],
+}
+
+// 3D export clipping zones per view (relative coords 0-1).
+// Edit these values to change where canvas content appears on the 3D model
+// without moving the visible rectangles in the mold editor.
+const modelExportZones: Record<string, { x: number; y: number; w: number; h: number }[]> = {
+  frente: [
+    { x: 0.29, y: 0.22, w: 0.16, h: 0.08 },
+    { x: 0.58, y: 0.22, w: 0.16, h: 0.08 },
+    { x: 0.36, y: 0.33, w: 0.28, h: 0.08 },
+    { x: 0.34, y: 0.50, w: 0.32, h: 0.08 },
+  ],
+  espalda: [
+    { x: 0.32, y: 0.14, w: 0.40, h: 0.08 },
+    { x: 0.32, y: 0.55, w: 0.40, h: 0.08 },
   ],
   manga_izquierda: [
     { x: 0.18, y: 0.40, w: 0.64, h: 0.25 },
@@ -310,9 +333,12 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
         })
       }
 
-      // Build clipped output: only zone regions are visible in 3D
+      // Build clipped output for 3D:
+      // - source zones come from the mold editor rectangles
+      // - destination zones come from model export mapping
       const vk = viewKey || activeView
-      const zones = zoneConfigs[vk] || []
+      const srcZones = imagePlacementZones[vk] || []
+      const dstZones = modelExportZones[vk] || []
 
       // Create offscreen canvas with transparent background
       const offscreen = document.createElement("canvas")
@@ -336,18 +362,25 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
       ctx.imageSmoothingEnabled = true
       ctx.imageSmoothingQuality = "high"
 
-      // Draw only the zone regions (no clip artifacts)
-      if (zones.length > 0) {
-        for (const z of zones) {
-          const sx = z.x * scaledW
-          const sy = z.y * scaledH
-          const sw = z.w * scaledW
-          const sh = z.h * scaledH
+      // Draw by zone mapping (source rectangle -> destination rectangle)
+      if (srcZones.length > 0 && dstZones.length > 0) {
+        const zoneCount = Math.min(srcZones.length, dstZones.length)
+        for (let i = 0; i < zoneCount; i++) {
+          const src = srcZones[i]
+          const dst = dstZones[i]
+          const sx = src.x * scaledW
+          const sy = src.y * scaledH
+          const sw = src.w * scaledW
+          const sh = src.h * scaledH
+          const dx = dst.x * scaledW
+          const dy = dst.y * scaledH
+          const dw = dst.w * scaledW
+          const dh = dst.h * scaledH
           if (!userCanvas) continue
-          ctx.drawImage(userCanvas, sx, sy, sw, sh, sx, sy, sw, sh)
+          ctx.drawImage(userCanvas, sx, sy, sw, sh, dx, dy, dw, dh)
         }
       } else {
-        // If no zones, draw entire user canvas
+        // If no mapping zones, draw entire user canvas
         if (!userCanvas) {
           return createTransparentPng(scaledW, scaledH)
         }
@@ -593,7 +626,7 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
           })
           canvas.backgroundImage = fabricImage
 
-          const zones = zoneConfigs[viewKey] || []
+          const zones = imagePlacementZones[viewKey] || []
           zones.forEach((zone: { x: number; y: number; w: number; h: number }) => {
             const rect = new fabric.Rect({
               left: zone.x * canvasWidth,
@@ -621,7 +654,7 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
       })
 
       type PixelZone = { left: number; top: number; width: number; height: number }
-      const zonesPx: PixelZone[] = (zoneConfigs[viewKey] || []).map((z) => ({
+      const zonesPx: PixelZone[] = (imagePlacementZones[viewKey] || []).map((z) => ({
         left: z.x * canvasWidth,
         top: z.y * canvasHeight,
         width: z.w * canvasWidth,
@@ -701,7 +734,7 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
         if (isLoadingRef.current) return
         const obj = e.target
         if (!obj || obj._isZone || obj._autoFitted) return
-        const zones = zoneConfigs[viewKey] || []
+        const zones = imagePlacementZones[viewKey] || []
         if (zones.length === 0) return
         const z = zones[0]
         const zW = z.w * canvasWidth
