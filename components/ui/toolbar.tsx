@@ -26,6 +26,7 @@ interface ToolbarProps {
     cuello: string
   }
   onPartColorChange: (part: "frente" | "espalda" | "manga_izquierda" | "manga_derecha" | "cuello", color: string) => void
+  onLastFontFamilyChange?: (fontFamily: string) => void
 }
 
 const FONT_OPTIONS = [
@@ -36,7 +37,7 @@ const FONT_OPTIONS = [
 
 const MAX_TEXT_LENGTH = 15
 
-export function Toolbar({ onImageUpload, onAddText, onUpdateSelectedTextStyle, onAddUploadedImage, onRemoveUploadedImage, uploadedImages, partColors, onPartColorChange }: ToolbarProps) {
+export function Toolbar({ onImageUpload, onAddText, onUpdateSelectedTextStyle, onAddUploadedImage, onRemoveUploadedImage, uploadedImages, partColors, onPartColorChange, onLastFontFamilyChange }: ToolbarProps) {
   const imageInputRef = useRef<HTMLInputElement>(null)
   const toolbarRef = useRef<HTMLDivElement>(null)
   const [activePanel, setActivePanel] = useState<"subidos" | "texto" | "partes" | null>(null)
@@ -283,6 +284,7 @@ export function Toolbar({ onImageUpload, onAddText, onUpdateSelectedTextStyle, o
                 <button
                   onClick={() => {
                     if (textInput.trim()) {
+                      onLastFontFamilyChange?.(selectedFont)
                       onAddText(textInput.slice(0, MAX_TEXT_LENGTH), selectedFont, textColor)
                       setActivePanel(null)
                     }
@@ -294,6 +296,7 @@ export function Toolbar({ onImageUpload, onAddText, onUpdateSelectedTextStyle, o
 
                 <button
                   onClick={() => {
+                    onLastFontFamilyChange?.(selectedFont)
                     const updated = onUpdateSelectedTextStyle(selectedFont, textColor)
                     setTextEditMessage(updated ? "Estilo aplicado al texto seleccionado" : "Selecciona un texto para editar")
                   }}

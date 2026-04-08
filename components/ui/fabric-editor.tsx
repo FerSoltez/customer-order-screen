@@ -34,18 +34,18 @@ const modelExportZones: Record<string, { x: number; y: number; w: number; h: num
   frente: [
     { x: 0.29, y: 0.22, w: 0.16, h: 0.08 },
     { x: 0.58, y: 0.22, w: 0.16, h: 0.08 },
-    { x: 0.36, y: 0.33, w: 0.28, h: 0.08 },
-    { x: 0.34, y: 0.50, w: 0.32, h: 0.08 },
+    { x: 0.38, y: 0.33, w: 0.25, h: 0.08 },
+    { x: 0.35, y: 0.48, w: 0.32, h: 0.08 },
   ],
   espalda: [
-    { x: 0.32, y: 0.14, w: 0.40, h: 0.08 },
-    { x: 0.32, y: 0.55, w: 0.40, h: 0.08 },
+    { x: 0.35, y: 0.10, w: 0.30, h: 0.06 },
+    { x: 0.35, y: 0.42, w: 0.30, h: 0.06 },
   ],
   manga_izquierda: [
-    { x: 0.18, y: 0.40, w: 0.64, h: 0.25 },
+    { x: 0.35, y: 0.40, w: 0.30, h: 0.25 },
   ],
   manga_derecha: [
-    { x: 0.18, y: 0.40, w: 0.64, h: 0.25 },
+    { x: 0.35, y: 0.40, w: 0.30, h: 0.25 },
   ],
 }
 
@@ -66,6 +66,7 @@ const templateRenderConfig: Record<string, { scale: number; offsetX: number; off
 const MANGAS_INTRO_KEY = "darklion-personalizador-mangas-intro-v1"
 const HISTORY_STORAGE_KEY = "darklion-personalizador-history-v1"
 const FABRIC_EXPORT_TARGET_SIZE = 2048
+const MAX_PASTED_TEXT_LENGTH = 15
 
 const isCanvasImageSource = (value: unknown): value is CanvasImageSource => {
   if (!value) return false
@@ -95,12 +96,54 @@ const createTransparentPng = (width: number, height: number): string | null => {
   }
 }
 
+const downscaleImageDataUrl = async (dataUrl: string, maxDimension = 1024): Promise<string> => {
+  try {
+    const img = document.createElement("img")
+    img.crossOrigin = "anonymous"
+
+    await new Promise<void>((resolve) => {
+      img.onload = () => resolve()
+      img.onerror = () => resolve()
+      img.src = dataUrl
+    })
+
+    if (!img.naturalWidth || !img.naturalHeight) return dataUrl
+
+    const longestSide = Math.max(img.naturalWidth, img.naturalHeight)
+    if (longestSide <= maxDimension) return dataUrl
+
+    const scale = maxDimension / longestSide
+    const targetW = Math.max(1, Math.round(img.naturalWidth * scale))
+    const targetH = Math.max(1, Math.round(img.naturalHeight * scale))
+
+    const canvas = document.createElement("canvas")
+    canvas.width = targetW
+    canvas.height = targetH
+    const ctx = canvas.getContext("2d")
+    if (!ctx) return dataUrl
+
+    ctx.imageSmoothingEnabled = true
+    ctx.imageSmoothingQuality = "high"
+    ctx.drawImage(img, 0, 0, targetW, targetH)
+    return canvas.toDataURL("image/png")
+  } catch {
+    return dataUrl
+  }
+}
+
 interface PersistedHistoryItem {
   stack: string[]
   index: number
 }
 
 type PersistedHistoryMap = Record<string, PersistedHistoryItem>
+type MangaHistorySnapshot = { primary: string; secondary: string }
+
+const isMangaHistorySnapshot = (value: unknown): value is MangaHistorySnapshot => {
+  if (!value || typeof value !== "object") return false
+  const candidate = value as Record<string, unknown>
+  return typeof candidate.primary === "string" && typeof candidate.secondary === "string"
+}
 
 interface FabricEditorProps {
   activeView: TemplateView
@@ -115,9 +158,12 @@ interface FabricEditorProps {
   canGlobalUndo?: boolean
   canGlobalRedo?: boolean
   onCanvasStateChange?: () => void
+  lastFontFamily?: string
+  onLastFontFamilyChange?: (fontFamily: string) => void
+  globalHistoryActionAt?: number
 }
 
-export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, onCanvasUpdate, initialViewObjects, onViewObjectsChange, onGlobalUndo, onGlobalRedo, canGlobalUndo = false, canGlobalRedo = false, onCanvasStateChange }: FabricEditorProps) {
+export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, onCanvasUpdate, initialViewObjects, onViewObjectsChange, onGlobalUndo, onGlobalRedo, canGlobalUndo = false, canGlobalRedo = false, onCanvasStateChange, lastFontFamily, onLastFontFamilyChange, globalHistoryActionAt = 0 }: FabricEditorProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const canvasRef2 = useRef<HTMLCanvasElement>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -138,6 +184,9 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
   const canvasInstanceMapRef = useRef<WeakMap<HTMLCanvasElement, any>>(new WeakMap())
   const savedStatesRef = useRef<Record<string, string>>(initialViewObjects ?? {})
   const currentViewRef = useRef<string>("")
+  const activeCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  const lastFontFamilyRef = useRef<string>("Inter, sans-serif")
+  const lastLocalHistoryActionAtRef = useRef(0)
   const [, setHistoryState] = useState(0)
   const [isHistoryBusy, setIsHistoryBusy] = useState(false)
   const [showMangasIntro, setShowMangasIntro] = useState(false)
@@ -257,8 +306,25 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
 
   useEffect(() => {
     if (!initialViewObjects) return
-    savedStatesRef.current = { ...initialViewObjects }
+    // Merge to avoid wiping recently saved views during rapid tab/mold switches.
+    savedStatesRef.current = { ...savedStatesRef.current, ...initialViewObjects }
   }, [initialViewObjects])
+
+  // Also load from parent's localStorage as fallback in case state is not yet synced
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("darklion-personalizador-3d-v1")
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        if (parsed.viewObjects && typeof parsed.viewObjects === "object") {
+          // Merge with current state, preferring localStorage
+          savedStatesRef.current = { ...savedStatesRef.current, ...parsed.viewObjects }
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }, [])
 
   useEffect(() => {
     if (!isMangas) return
@@ -466,25 +532,49 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
     }
 
     void restore()
-  }, [activeView, isMangas, notifyUpdate, primaryMangaKey, restoreRevision, secondaryMangaKey])
+  }, [restoreRevision])
 
   const saveToHistory = useCallback(() => {
     if (!fabricRef.current || isLoadingRef.current) return
     try {
-      // Save only user objects (not zones/background) so undo/redo never affects the template
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const userObjs = fabricRef.current.getObjects().filter((o: any) => !o._isZone)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const json = JSON.stringify(userObjs.map((o: any) => o.toObject()))
+      const serializeCanvas = (canvas: any) => {
+        if (!canvas) return "[]"
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const userObjs = canvas.getObjects().filter((o: any) => !o._isZone)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return JSON.stringify(userObjs.map((o: any) => o.toObject()))
+      }
+
+      const json = isMangas
+        ? JSON.stringify({
+            primary: serializeCanvas(fabricRef.current),
+            secondary: serializeCanvas(fabricRef2.current),
+          })
+        : serializeCanvas(fabricRef.current)
+
       historyRef.current = historyRef.current.slice(0, historyIndexRef.current + 1)
       historyRef.current.push(json)
       historyIndexRef.current = historyRef.current.length - 1
       saveHistorySnapshot(currentHistoryKey)
       setHistoryState((s) => s + 1)
+      lastLocalHistoryActionAtRef.current = Date.now()
     } catch {
       // ignore
     }
-  }, [currentHistoryKey, saveHistorySnapshot])
+  }, [currentHistoryKey, isMangas, saveHistorySnapshot])
+
+  const getEmptyHistoryEntry = useCallback(() => {
+    return isMangas
+      ? JSON.stringify({ primary: "[]", secondary: "[]" })
+      : "[]"
+  }, [isMangas])
+
+  // Sync lastFontFamily prop to local ref
+  useEffect(() => {
+    if (lastFontFamily) {
+      lastFontFamilyRef.current = lastFontFamily
+    }
+  }, [lastFontFamily])
 
   const initSingleCanvas = useCallback(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -788,12 +878,14 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
               if (!imageType) continue
 
               const blob = await item.getType(imageType)
-              const dataUrl = await new Promise<string>((resolve, reject) => {
+              const rawDataUrl = await new Promise<string>((resolve, reject) => {
                 const reader = new FileReader()
                 reader.onload = () => resolve(reader.result as string)
                 reader.onerror = () => reject(new Error("No se pudo leer la imagen pegada"))
                 reader.readAsDataURL(blob)
               })
+
+              const dataUrl = await downscaleImageDataUrl(rawDataUrl)
 
               const imgEl = document.createElement("img")
               imgEl.crossOrigin = "anonymous"
@@ -832,15 +924,18 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
 
         try {
           const text = await navigator.clipboard.readText()
-          if (!text?.trim()) return
-          const txt = new fabric.IText(text.trim(), {
+          const trimmedText = text?.trim() || ""
+          if (!trimmedText) return
+          const clippedText = trimmedText.slice(0, MAX_PASTED_TEXT_LENGTH)
+          if (!clippedText) return
+          const txt = new fabric.IText(clippedText, {
             left: canvasWidth / 2,
             top: canvasHeight / 2,
             originX: "center",
             originY: "center",
             fontSize: 28,
             fill: "#1a1a2e",
-            fontFamily: "Inter, sans-serif",
+            fontFamily: lastFontFamilyRef.current,
           })
           canvas.add(txt)
           canvas.setActiveObject(txt)
@@ -861,8 +956,16 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
         )
 
         if (!isTypingTarget && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") {
-          e.preventDefault()
-          void pasteFromClipboard()
+          // Only paste in the canvas that currently has the mouse pointer
+          if (activeCanvasRef.current === canvasEl) {
+            e.preventDefault()
+            void pasteFromClipboard()
+            return
+          }
+        }
+
+        // Only handle Delete/Backspace in the active canvas (mangas have two separate canvas)
+        if ((e.key === "Delete" || e.key === "Backspace") && activeCanvasRef.current !== canvasEl) {
           return
         }
 
@@ -881,6 +984,27 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ;(canvas as any).__keyHandler = handleKeyDown
 
+      // Track canvas hover for paste operations using mouseenter/mouseleave
+      const handleMouseEnter = () => {
+        activeCanvasRef.current = canvasEl
+      }
+      const handleMouseLeave = () => {
+        if (activeCanvasRef.current === canvasEl) {
+          activeCanvasRef.current = null
+        }
+      }
+      canvasEl.addEventListener("mouseenter", handleMouseEnter)
+      canvasEl.addEventListener("mouseleave", handleMouseLeave)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(canvas as any).__mouseEnterHandler = handleMouseEnter
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(canvas as any).__mouseLeaveHandler = handleMouseLeave
+
+      // Also track on Fabric mouse:down event as backup
+      canvas.on("mouse:down", () => {
+        activeCanvasRef.current = canvasEl
+      })
+
       return canvas
     },
     []
@@ -892,7 +1016,7 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
     const currentInit = ++initCountRef.current
     isLoadingRef.current = true
 
-    // Save state of current view before disposing
+    // Save state of current view before disposing (critical: must happen synchronously)
     if (currentViewRef.current) {
       const prevIsMangas = currentViewRef.current === "mangas"
       if (fabricRef.current) {
@@ -908,6 +1032,12 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
     if (fabricRef.current) {
       try {
         if (fabricRef.current.__keyHandler) document.removeEventListener("keydown", fabricRef.current.__keyHandler)
+        if (canvasRef.current && fabricRef.current.__mouseEnterHandler) {
+          canvasRef.current.removeEventListener("mouseenter", fabricRef.current.__mouseEnterHandler)
+        }
+        if (canvasRef.current && fabricRef.current.__mouseLeaveHandler) {
+          canvasRef.current.removeEventListener("mouseleave", fabricRef.current.__mouseLeaveHandler)
+        }
         fabricRef.current.dispose()
       } catch { /* ignore */ }
       fabricRef.current = null
@@ -918,6 +1048,12 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
     if (fabricRef2.current) {
       try {
         if (fabricRef2.current.__keyHandler) document.removeEventListener("keydown", fabricRef2.current.__keyHandler)
+        if (canvasRef2.current && fabricRef2.current.__mouseEnterHandler) {
+          canvasRef2.current.removeEventListener("mouseenter", fabricRef2.current.__mouseEnterHandler)
+        }
+        if (canvasRef2.current && fabricRef2.current.__mouseLeaveHandler) {
+          canvasRef2.current.removeEventListener("mouseleave", fabricRef2.current.__mouseLeaveHandler)
+        }
         fabricRef2.current.dispose()
       } catch { /* ignore */ }
       fabricRef2.current = null
@@ -1006,14 +1142,30 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
 
     // Restore history if available (survives browser refresh), otherwise create initial history from current canvas state.
     const persistedHistory = loadHistorySnapshot(currentHistoryKey)
+    const emptyHistoryEntry = getEmptyHistoryEntry()
     if (persistedHistory && persistedHistory.stack.length > 0) {
-      historyRef.current = persistedHistory.stack
-      historyIndexRef.current = persistedHistory.index
+      const normalizedStack = [...persistedHistory.stack]
+      let normalizedIndex = persistedHistory.index
+      if (normalizedStack[0] !== emptyHistoryEntry) {
+        normalizedStack.unshift(emptyHistoryEntry)
+        normalizedIndex += 1
+      }
+      historyRef.current = normalizedStack
+      historyIndexRef.current = Math.max(0, Math.min(normalizedIndex, normalizedStack.length - 1))
       setHistoryState((s) => s + 1)
     } else {
-      historyRef.current = []
-      historyIndexRef.current = -1
-      saveToHistory()
+      historyRef.current = [emptyHistoryEntry]
+      historyIndexRef.current = 0
+
+      const hasCurrentObjects = isMangas
+        ? hasUserObjects(fabricRef.current) || hasUserObjects(fabricRef2.current)
+        : hasUserObjects(fabricRef.current)
+      if (hasCurrentObjects) {
+        saveToHistory()
+      } else {
+        saveHistorySnapshot(currentHistoryKey)
+        setHistoryState((s) => s + 1)
+      }
     }
     
     // Call notifyUpdate immediately after objects are restored
@@ -1066,7 +1218,7 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
       })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeView, isMangas])
+  }, [activeView, getEmptyHistoryEntry, hasUserObjects, isMangas, loadHistorySnapshot, notifyUpdate, onCanvasReady, onCanvasStateChange, persistCanvasState, primaryMangaKey, saveHistorySnapshot, saveToHistory, secondaryMangaKey])
 
   useEffect(() => {
     initCanvas()
@@ -1103,6 +1255,37 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
     }
   }, [initCanvas])
 
+  useEffect(() => {
+    const flushCurrentCanvasState = () => {
+      try {
+        if (isLoadingRef.current) return
+
+        if (isMangas) {
+          if (fabricRef.current) {
+            persistCanvasState(fabricRef.current, primaryMangaKey, true)
+          }
+          if (fabricRef2.current) {
+            persistCanvasState(fabricRef2.current, secondaryMangaKey, true)
+          }
+        } else if (fabricRef.current) {
+          persistCanvasState(fabricRef.current, activeView, true)
+        }
+
+        notifyUpdate(true)
+      } catch {
+        // ignore flush errors during unload
+      }
+    }
+
+    window.addEventListener("beforeunload", flushCurrentCanvasState)
+    window.addEventListener("pagehide", flushCurrentCanvasState)
+
+    return () => {
+      window.removeEventListener("beforeunload", flushCurrentCanvasState)
+      window.removeEventListener("pagehide", flushCurrentCanvasState)
+    }
+  }, [activeView, isMangas, notifyUpdate, persistCanvasState, primaryMangaKey, secondaryMangaKey])
+
   const handleUndo = useCallback(async () => {
     if (!fabricRef.current || !fabricModuleRef.current || historyIndexRef.current <= 0 || historyBusyRef.current) return
     historyBusyRef.current = true
@@ -1110,35 +1293,61 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
     historyIndexRef.current--
     isLoadingRef.current = true
     try {
-      // Remove current user objects (keep zones and background intact)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const toRemove = fabricRef.current.getObjects().filter((o: any) => !o._isZone)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      toRemove.forEach((o: any) => fabricRef.current.remove(o))
-
-      const data = JSON.parse(historyRef.current[historyIndexRef.current])
-      if (data.length > 0) {
-        const restored = await fabricModuleRef.current.util.enlivenObjects(data)
+      const restoreCanvasFromSerialized = async (targetCanvas: any, serialized: string) => {
+        if (!targetCanvas) return
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        restored.forEach((o: any) => {
-          o._autoFitted = true
-          enforceMinimumSize(o)
-          fabricRef.current.add(o)
-        })
+        const toRemove = targetCanvas.getObjects().filter((o: any) => !o._isZone)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        toRemove.forEach((o: any) => targetCanvas.remove(o))
+
+        const data = JSON.parse(serialized)
+        if (Array.isArray(data) && data.length > 0) {
+          const restored = await fabricModuleRef.current.util.enlivenObjects(data)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          restored.forEach((o: any) => {
+            o._autoFitted = true
+            enforceMinimumSize(o)
+            targetCanvas.add(o)
+          })
+        }
+      }
+
+      const snapshot = JSON.parse(historyRef.current[historyIndexRef.current])
+      if (isMangas && isMangaHistorySnapshot(snapshot)) {
+        await restoreCanvasFromSerialized(fabricRef.current, snapshot.primary || "[]")
+        await restoreCanvasFromSerialized(fabricRef2.current, snapshot.secondary || "[]")
+      } else if (isMangas && Array.isArray(snapshot)) {
+        // Legacy manga snapshot format: restore primary and clear secondary to avoid residuals.
+        await restoreCanvasFromSerialized(fabricRef.current, JSON.stringify(snapshot))
+        await restoreCanvasFromSerialized(fabricRef2.current, "[]")
+      } else {
+        await restoreCanvasFromSerialized(fabricRef.current, JSON.stringify(snapshot))
+      }
+
+      if (historyIndexRef.current <= 0) {
+        await restoreCanvasFromSerialized(fabricRef.current, "[]")
+        if (isMangas && fabricRef2.current) {
+          await restoreCanvasFromSerialized(fabricRef2.current, "[]")
+        }
       }
     } catch { /* ignore */ }
     finally {
       fabricRef.current.renderAll()
+      fabricRef2.current?.renderAll()
       isLoadingRef.current = false
       const saveKey = isMangas ? primaryMangaKey : activeView
       persistCanvasState(fabricRef.current, saveKey, true)
+      if (isMangas && fabricRef2.current) {
+        persistCanvasState(fabricRef2.current, secondaryMangaKey, true)
+      }
       notifyUpdate(true)
       saveHistorySnapshot(saveKey)
       setHistoryState((s) => s + 1)
+      lastLocalHistoryActionAtRef.current = Date.now()
       historyBusyRef.current = false
       setIsHistoryBusy(false)
     }
-  }, [activeView, isMangas, notifyUpdate, persistCanvasState, primaryMangaKey, saveHistorySnapshot])
+  }, [activeView, enforceMinimumSize, getEmptyHistoryEntry, isMangas, notifyUpdate, persistCanvasState, primaryMangaKey, saveHistorySnapshot, secondaryMangaKey])
 
   const handleRedo = useCallback(async () => {
     if (!fabricRef.current || !fabricModuleRef.current || historyIndexRef.current >= historyRef.current.length - 1 || historyBusyRef.current) return
@@ -1147,38 +1356,58 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
     historyIndexRef.current++
     isLoadingRef.current = true
     try {
-      // Remove current user objects (keep zones and background intact)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const toRemove = fabricRef.current.getObjects().filter((o: any) => !o._isZone)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      toRemove.forEach((o: any) => fabricRef.current.remove(o))
-
-      const data = JSON.parse(historyRef.current[historyIndexRef.current])
-      if (data.length > 0) {
-        const restored = await fabricModuleRef.current.util.enlivenObjects(data)
+      const restoreCanvasFromSerialized = async (targetCanvas: any, serialized: string) => {
+        if (!targetCanvas) return
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        restored.forEach((o: any) => {
-          o._autoFitted = true
-          enforceMinimumSize(o)
-          fabricRef.current.add(o)
-        })
+        const toRemove = targetCanvas.getObjects().filter((o: any) => !o._isZone)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        toRemove.forEach((o: any) => targetCanvas.remove(o))
+
+        const data = JSON.parse(serialized)
+        if (Array.isArray(data) && data.length > 0) {
+          const restored = await fabricModuleRef.current.util.enlivenObjects(data)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          restored.forEach((o: any) => {
+            o._autoFitted = true
+            enforceMinimumSize(o)
+            targetCanvas.add(o)
+          })
+        }
+      }
+
+      const snapshot = JSON.parse(historyRef.current[historyIndexRef.current])
+      if (isMangas && isMangaHistorySnapshot(snapshot)) {
+        await restoreCanvasFromSerialized(fabricRef.current, snapshot.primary || "[]")
+        await restoreCanvasFromSerialized(fabricRef2.current, snapshot.secondary || "[]")
+      } else if (isMangas && Array.isArray(snapshot)) {
+        await restoreCanvasFromSerialized(fabricRef.current, JSON.stringify(snapshot))
+        await restoreCanvasFromSerialized(fabricRef2.current, "[]")
+      } else {
+        await restoreCanvasFromSerialized(fabricRef.current, JSON.stringify(snapshot))
       }
     } catch { /* ignore */ }
     finally {
       fabricRef.current.renderAll()
+      fabricRef2.current?.renderAll()
       isLoadingRef.current = false
       const saveKey = isMangas ? primaryMangaKey : activeView
       persistCanvasState(fabricRef.current, saveKey, true)
+      if (isMangas && fabricRef2.current) {
+        persistCanvasState(fabricRef2.current, secondaryMangaKey, true)
+      }
       notifyUpdate(true)
       saveHistorySnapshot(saveKey)
       setHistoryState((s) => s + 1)
+      lastLocalHistoryActionAtRef.current = Date.now()
       historyBusyRef.current = false
       setIsHistoryBusy(false)
     }
-  }, [activeView, isMangas, notifyUpdate, persistCanvasState, primaryMangaKey, saveHistorySnapshot])
+  }, [activeView, enforceMinimumSize, isMangas, notifyUpdate, persistCanvasState, primaryMangaKey, saveHistorySnapshot, secondaryMangaKey])
 
   const canUndo = !isHistoryBusy && historyIndexRef.current > 0
   const canRedo = !isHistoryBusy && historyIndexRef.current < historyRef.current.length - 1
+  const shouldUseLocalUndo = canUndo && (!canGlobalUndo || lastLocalHistoryActionAtRef.current >= globalHistoryActionAt)
+  const shouldUseLocalRedo = canRedo && (!canGlobalRedo || lastLocalHistoryActionAtRef.current >= globalHistoryActionAt)
 
   // Keyboard shortcuts: Ctrl+Z / Ctrl+Y
   useEffect(() => {
@@ -1186,32 +1415,44 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
       if (historyBusyRef.current) return
       if ((e.ctrlKey || e.metaKey) && e.key === "z") {
         e.preventDefault()
-        if (canGlobalUndo) {
+        if (shouldUseLocalUndo) {
+          void handleUndo()
+        } else if (canGlobalUndo) {
           onGlobalUndo?.()
         }
       }
       if ((e.ctrlKey || e.metaKey) && e.key === "y") {
         e.preventDefault()
-        if (canGlobalRedo) {
+        if (shouldUseLocalRedo) {
+          void handleRedo()
+        } else if (canGlobalRedo) {
           onGlobalRedo?.()
         }
       }
     }
     document.addEventListener("keydown", handleGlobalKey)
     return () => document.removeEventListener("keydown", handleGlobalKey)
-  }, [canGlobalRedo, canGlobalUndo, canRedo, canUndo, handleRedo, handleUndo, onGlobalRedo, onGlobalUndo])
+  }, [canGlobalRedo, canGlobalUndo, handleRedo, handleUndo, onGlobalRedo, onGlobalUndo, shouldUseLocalRedo, shouldUseLocalUndo])
 
   const handleUndoAction = useCallback(() => {
+    if (shouldUseLocalUndo) {
+      void handleUndo()
+      return
+    }
     if (canGlobalUndo) {
       onGlobalUndo?.()
     }
-  }, [canGlobalUndo, onGlobalUndo])
+  }, [canGlobalUndo, handleUndo, onGlobalUndo, shouldUseLocalUndo])
 
   const handleRedoAction = useCallback(() => {
+    if (shouldUseLocalRedo) {
+      void handleRedo()
+      return
+    }
     if (canGlobalRedo) {
       onGlobalRedo?.()
     }
-  }, [canGlobalRedo, onGlobalRedo])
+  }, [canGlobalRedo, handleRedo, onGlobalRedo, shouldUseLocalRedo])
 
   const handleCloseMangasIntro = useCallback(() => {
     setShowMangasIntro(false)
@@ -1247,7 +1488,7 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
       <div className="flex items-center gap-1.5 px-3 py-1.5">
         <button
           onClick={handleUndoAction}
-          disabled={!canGlobalUndo}
+          disabled={!(canGlobalUndo || canUndo)}
           className="flex h-8 w-8 items-center justify-center rounded-full border border-foreground/30 bg-card text-foreground transition-colors hover:bg-secondary disabled:opacity-30"
           title="Deshacer (Ctrl+Z)"
           aria-label="Deshacer"
@@ -1256,7 +1497,7 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
         </button>
         <button
           onClick={handleRedoAction}
-          disabled={!canGlobalRedo}
+          disabled={!(canGlobalRedo || canRedo)}
           className="flex h-8 w-8 items-center justify-center rounded-full border border-foreground/30 bg-card text-foreground transition-colors hover:bg-secondary disabled:opacity-30"
           title="Rehacer (Ctrl+Y)"
           aria-label="Rehacer"
