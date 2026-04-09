@@ -40,7 +40,7 @@ const MAX_TEXT_LENGTH = 15
 export function Toolbar({ onImageUpload, onAddText, onUpdateSelectedTextStyle, onAddUploadedImage, onRemoveUploadedImage, uploadedImages, partColors, onPartColorChange, onLastFontFamilyChange }: ToolbarProps) {
   const imageInputRef = useRef<HTMLInputElement>(null)
   const toolbarRef = useRef<HTMLDivElement>(null)
-  const [activePanel, setActivePanel] = useState<"subidos" | "texto" | "partes" | null>(null)
+  const [activePanel, setActivePanel] = useState<"colores" | "subidos" | "texto" | null>(null)
   const [expandedParts, setExpandedParts] = useState<Record<string, boolean>>({
     frente: false,
     espalda: false,
@@ -53,7 +53,7 @@ export function Toolbar({ onImageUpload, onAddText, onUpdateSelectedTextStyle, o
   const [textColor, setTextColor] = useState("#1a1a2e")
   const [textEditMessage, setTextEditMessage] = useState<string | null>(null)
 
-  const togglePanel = (panel: "subidos" | "texto" | "partes") => {
+  const togglePanel = (panel: "colores" | "subidos" | "texto") => {
     setActivePanel(activePanel === panel ? null : panel)
   }
 
@@ -82,6 +82,20 @@ export function Toolbar({ onImageUpload, onAddText, onUpdateSelectedTextStyle, o
     <div className="relative flex flex-row items-start gap-0 md:flex-col" ref={toolbarRef}>
       {/* Main toolbar buttons */}
       <div className="flex flex-row items-center gap-2 rounded-xl bg-card p-2 shadow-lg md:flex-col md:gap-3 md:p-3">
+        {/* Colores */}
+        <button
+          onClick={() => togglePanel("colores")}
+          className={`flex flex-col items-center gap-1 rounded-lg p-2 transition-colors ${
+            activePanel === "colores" ? "bg-secondary" : "hover:bg-secondary/60"
+          }`}
+          title="Editar colores"
+        >
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-secondary md:h-12 md:w-12">
+            <Palette className="h-5 w-5 text-primary md:h-6 md:w-6" />
+          </div>
+          <span className="text-[10px] font-medium text-foreground md:text-xs">Colores</span>
+        </button>
+
         {/* Subidos */}
         <button
           onClick={() => togglePanel("subidos")}
@@ -132,20 +146,6 @@ export function Toolbar({ onImageUpload, onAddText, onUpdateSelectedTextStyle, o
           </div>
           <span className="text-[10px] font-medium text-foreground md:text-xs">Texto</span>
         </button>
-
-        {/* Partes */}
-        <button
-          onClick={() => togglePanel("partes")}
-          className={`flex flex-col items-center gap-1 rounded-lg p-2 transition-colors ${
-            activePanel === "partes" ? "bg-secondary" : "hover:bg-secondary/60"
-          }`}
-          title="Editar color de partes"
-        >
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-secondary md:h-12 md:w-12">
-            <Palette className="h-5 w-5 text-primary md:h-6 md:w-6" />
-          </div>
-          <span className="text-[10px] font-medium text-foreground md:text-xs">Partes</span>
-        </button>
       </div>
 
       {/* Expandable panels */}
@@ -153,11 +153,11 @@ export function Toolbar({ onImageUpload, onAddText, onUpdateSelectedTextStyle, o
         <div className="absolute left-0 top-full z-30 mt-2 flex max-h-[340px] w-72 flex-col overflow-hidden rounded-xl border border-border bg-card shadow-xl md:left-full md:top-0 md:ml-3 md:mt-0 md:max-h-[500px] md:w-80 sm:w-screen sm:left-0 sm:right-0 sm:mx-auto sm:max-w-sm">
           <div className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
             <h3 className="text-sm font-bold text-foreground">
-              {activePanel === "subidos"
-                ? "Archivos Subidos"
-                : activePanel === "texto"
-                  ? "Agregar Texto"
-                  : "Color de Partes"}
+              {activePanel === "colores"
+                ? "Colores"
+                : activePanel === "subidos"
+                  ? "Archivos Subidos"
+                  : "Agregar Texto"}
             </h3>
             <button
               onClick={() => setActivePanel(null)}
@@ -311,7 +311,7 @@ export function Toolbar({ onImageUpload, onAddText, onUpdateSelectedTextStyle, o
               </div>
             )}
 
-            {activePanel === "partes" && (
+            {activePanel === "colores" && (
               <div className="flex flex-col gap-2">
                 <button
                   onClick={() => togglePart("frente")}

@@ -294,7 +294,9 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
       const userObjs = canvas.getObjects().filter((o: any) => !o._isZone)
       if (userObjs.length > 0) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const serialized = JSON.stringify(userObjs.map((o: any) => o.toObject()))
+        const serialized = JSON.stringify(
+          userObjs.map((o: any) => o.toObject(["_zoneIndex", "_fixedToZone", "_autoFitted"]))
+        )
         savedStatesRef.current[saveKey] = serialized
         onViewObjectsChange?.(saveKey, serialized)
       } else if (allowEmpty) {
@@ -517,6 +519,9 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
           }
 
           targetCanvas.renderAll()
+          if (typeof targetCanvas.__syncZoneIndicators === "function") {
+            targetCanvas.__syncZoneIndicators()
+          }
         }
 
         if (isMangas) {
@@ -544,7 +549,7 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const userObjs = canvas.getObjects().filter((o: any) => !o._isZone)
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        return JSON.stringify(userObjs.map((o: any) => o.toObject()))
+        return JSON.stringify(userObjs.map((o: any) => o.toObject(["_zoneIndex", "_fixedToZone", "_autoFitted"])))
       }
 
       const json = isMangas
@@ -767,18 +772,73 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
       }))
       const zoneIndicators: Record<number, any> = {}
 
+      const isImageInZone = (obj: any, zone: PixelZone, zoneIndex: number) => {
+        if (!obj || obj?._isZone || obj?.type !== "image") return false
+        if (obj?._zoneIndex === zoneIndex) return true
+
+        const center = typeof obj.getCenterPoint === "function" ? obj.getCenterPoint() : null
+        if (center) {
+          const centerInside = (
+            center.x >= zone.left &&
+            center.x <= zone.left + zone.width &&
+            center.y >= zone.top &&
+            center.y <= zone.top + zone.height
+          )
+          if (centerInside) return true
+        }
+
+        const bounds = typeof obj.getBoundingRect === "function" ? obj.getBoundingRect(true, true) : null
+        if (!bounds) return false
+        const intersects = !(
+          bounds.left + bounds.width < zone.left ||
+          bounds.left > zone.left + zone.width ||
+          bounds.top + bounds.height < zone.top ||
+          bounds.top > zone.top + zone.height
+        )
+        return intersects
+      }
+
       const updateZoneIndicatorVisibility = (zoneIndex: number) => {
         const indicator = zoneIndicators[zoneIndex]
         if (!indicator) return
+        const zone = zonesPx[zoneIndex]
+        if (!zone) {
+          indicator.visible = false
+          return
+        }
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const hasImage = canvas.getObjects().some((o: any) => !o?._isZone && o?.type === "image" && o?._zoneIndex === zoneIndex)
+        const hasImage = canvas.getObjects().some((o: any) => isImageInZone(o, zone, zoneIndex))
         indicator.visible = !hasImage
+        // Send to back to ensure it never appears above images
+        if (typeof indicator.sendToBack === "function") {
+          indicator.sendToBack()
+        }
       }
 
       const refreshAllZoneIndicators = () => {
         Object.keys(zoneIndicators).forEach((k) => updateZoneIndicatorVisibility(Number(k)))
       }
 
+      const syncZoneIndicators = () => {
+        refreshAllZoneIndicators()
+        // Always send zone indicators to the back so they never appear over images
+        sendZoneIndicatorsToBack()
+        canvas.renderAll()
+      }
+
+      const sendZoneIndicatorsToBack = () => {
+        Object.values(zoneIndicators).forEach((indicator: any) => {
+          if (indicator && typeof indicator.sendToBack === "function") {
+            indicator.sendToBack()
+          }
+        })
+      }
+  syncZoneIndicators()
+      sendZoneIndicatorsToBack()
+      ;(canvas as any).__syncZoneIndicators = () => {
+        syncZoneIndicators()
+        sendZoneIndicatorsToBack()
+      }
       zonesPx.forEach((zone, zoneIndex) => {
         const iconColor = "#7c3aed"
         const iconScale = Math.max(1.15, Math.min(2.15, Math.min(zone.width, zone.height) / 62))
@@ -1361,15 +1421,25 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
             obj._autoFitted = true
             cvs.add(obj)
           })
-          cvs.renderAll()
         }
       } catch { /* ignore */ }
+      // Always sync zone indicators after restoration (even if empty) to reorder layers
+      if (typeof cvs.__syncZoneIndicators === "function") {
+        cvs.__syncZoneIndicators()
+      }
     }
     if (isMangas) {
       if (fabricRef.current) await restoreUserObjects(fabricRef.current, primaryMangaKey)
       if (fabricRef2.current) await restoreUserObjects(fabricRef2.current, secondaryMangaKey)
     } else {
       if (fabricRef.current) await restoreUserObjects(fabricRef.current, activeView)
+    }
+    // Final sync to guarantee indicator layer ordering after all restorations
+    if (typeof (fabricRef.current as any)?.__syncZoneIndicators === "function") {
+      ;(fabricRef.current as any).__syncZoneIndicators()
+    }
+    if (typeof (fabricRef2.current as any)?.__syncZoneIndicators === "function") {
+      ;(fabricRef2.current as any).__syncZoneIndicators()
     }
     if (currentInit !== initCountRef.current) return
 
@@ -1569,6 +1639,12 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
     finally {
       fabricRef.current.renderAll()
       fabricRef2.current?.renderAll()
+      if (typeof (fabricRef.current as any)?.__syncZoneIndicators === "function") {
+        ;(fabricRef.current as any).__syncZoneIndicators()
+      }
+      if (typeof (fabricRef2.current as any)?.__syncZoneIndicators === "function") {
+        ;(fabricRef2.current as any).__syncZoneIndicators()
+      }
       isLoadingRef.current = false
       const saveKey = isMangas ? primaryMangaKey : activeView
       persistCanvasState(fabricRef.current, saveKey, true)
@@ -1624,6 +1700,12 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
     finally {
       fabricRef.current.renderAll()
       fabricRef2.current?.renderAll()
+      if (typeof (fabricRef.current as any)?.__syncZoneIndicators === "function") {
+        ;(fabricRef.current as any).__syncZoneIndicators()
+      }
+      if (typeof (fabricRef2.current as any)?.__syncZoneIndicators === "function") {
+        ;(fabricRef2.current as any).__syncZoneIndicators()
+      }
       isLoadingRef.current = false
       const saveKey = isMangas ? primaryMangaKey : activeView
       persistCanvasState(fabricRef.current, saveKey, true)
