@@ -203,6 +203,8 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
       lockScalingFlip: true,
       lockSkewingX: true,
       lockSkewingY: true,
+      lockMovementX: true,
+      lockMovementY: true,
     })
     obj.setControlsVisibility?.({
       mt: true,
@@ -599,7 +601,8 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
         width: canvasWidth,
         height: canvasHeight,
         backgroundColor: "rgba(0,0,0,0)",
-        selection: true,
+        // Disable drag-marquee selection to avoid accidental grouped selection overlays.
+        selection: false,
       })
       canvasInstanceMapRef.current.set(canvasEl, canvas)
 
@@ -717,7 +720,17 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
           canvas.backgroundImage = fabricImage
 
           const zones = imagePlacementZones[viewKey] || []
-          zones.forEach((zone: { x: number; y: number; w: number; h: number }) => {
+          zones.forEach((zone: { x: number; y: number; w: number; h: number }, zoneIndex: number) => {
+            const zoneGradient = new fabric.Gradient({
+              type: "linear",
+              gradientUnits: "percentage",
+              coords: { x1: 0, y1: 0, x2: 1, y2: 1 },
+              colorStops: [
+                { offset: 0, color: "rgba(109, 40, 217, 0.35)" },
+                { offset: 0.55, color: "rgba(124, 58, 237, 0.22)" },
+                { offset: 1, color: "rgba(167, 139, 250, 0.16)" },
+              ],
+            })
             const rect = new fabric.Rect({
               left: zone.x * canvasWidth,
               top: zone.y * canvasHeight,
@@ -725,14 +738,16 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
               originY: "top",
               width: zone.w * canvasWidth,
               height: zone.h * canvasHeight,
-              fill: "transparent",
+              fill: zoneGradient,
               stroke: "#7c3aed",
               strokeWidth: 1.5,
               selectable: false,
-              evented: false,
+              evented: true,
+              hoverCursor: "pointer",
               excludeFromExport: true,
             })
             ;(rect as any)._isZone = true
+            ;(rect as any)._zoneIndex = zoneIndex
             canvas.add(rect)
           })
 
@@ -750,6 +765,183 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
         width: z.w * canvasWidth,
         height: z.h * canvasHeight,
       }))
+      const zoneIndicators: Record<number, any> = {}
+
+      const updateZoneIndicatorVisibility = (zoneIndex: number) => {
+        const indicator = zoneIndicators[zoneIndex]
+        if (!indicator) return
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const hasImage = canvas.getObjects().some((o: any) => !o?._isZone && o?.type === "image" && o?._zoneIndex === zoneIndex)
+        indicator.visible = !hasImage
+      }
+
+      const refreshAllZoneIndicators = () => {
+        Object.keys(zoneIndicators).forEach((k) => updateZoneIndicatorVisibility(Number(k)))
+      }
+
+      zonesPx.forEach((zone, zoneIndex) => {
+        const iconColor = "#7c3aed"
+        const iconScale = Math.max(1.15, Math.min(2.15, Math.min(zone.width, zone.height) / 62))
+
+        // Lucide Upload icon geometry (same visual language as toolbar "Subidos" button).
+        const tray = new fabric.Path("M3 15 V19 A2 2 0 0 0 5 21 H19 A2 2 0 0 0 21 19 V15", {
+          fill: "",
+          stroke: iconColor,
+          strokeWidth: 1.8,
+          strokeLineCap: "round",
+          strokeLineJoin: "round",
+          selectable: false,
+          evented: false,
+          excludeFromExport: true,
+          originX: "center",
+          originY: "center",
+        })
+        const stem = new fabric.Line([12, 15, 12, 5], {
+          stroke: iconColor,
+          strokeWidth: 1.8,
+          strokeLineCap: "round",
+          selectable: false,
+          evented: false,
+          excludeFromExport: true,
+          originX: "center",
+          originY: "center",
+        })
+        const headLeft = new fabric.Line([12, 5, 7, 10], {
+          stroke: iconColor,
+          strokeWidth: 1.8,
+          strokeLineCap: "round",
+          selectable: false,
+          evented: false,
+          excludeFromExport: true,
+          originX: "center",
+          originY: "center",
+        })
+        const headRight = new fabric.Line([12, 5, 17, 10], {
+          stroke: iconColor,
+          strokeWidth: 1.8,
+          strokeLineCap: "round",
+          selectable: false,
+          evented: false,
+          excludeFromExport: true,
+          originX: "center",
+          originY: "center",
+        })
+        const icon = new fabric.Group([tray, stem, headLeft, headRight], {
+          left: 0,
+          top: 0,
+          scaleX: iconScale,
+          scaleY: iconScale,
+          originX: "center",
+          originY: "center",
+          selectable: false,
+          evented: false,
+          excludeFromExport: true,
+        })
+        const group = new fabric.Group([icon], {
+          left: zone.left + zone.width / 2,
+          top: zone.top + zone.height / 2,
+          originX: "center",
+          originY: "center",
+          selectable: false,
+          evented: false,
+          excludeFromExport: true,
+        })
+        ;(group as any)._isZone = true
+        ;(group as any)._isZoneIndicator = true
+        ;(group as any)._zoneIndex = zoneIndex
+        zoneIndicators[zoneIndex] = group
+        canvas.add(group)
+      })
+
+      const getZoneByIndex = (zoneIndex: number): PixelZone | null => {
+        if (zoneIndex < 0 || zoneIndex >= zonesPx.length) return null
+        return zonesPx[zoneIndex]
+      }
+
+      const addImageToZone = async (zoneIndex: number, dataUrl: string) => {
+        const zone = getZoneByIndex(zoneIndex)
+        if (!zone) return
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const existing = canvas.getObjects().find((o: any) => !o?._isZone && o?.type === "image" && o?._zoneIndex === zoneIndex)
+
+        if (existing) {
+          const shouldReplace = window.confirm("Este rectangulo ya tiene una imagen. ¿Deseas reemplazarla?")
+          if (!shouldReplace) {
+            const shouldRemove = window.confirm("¿Deseas eliminar la imagen actual de este rectangulo?")
+            if (shouldRemove) {
+              canvas.remove(existing)
+              canvas.discardActiveObject()
+              updateZoneIndicatorVisibility(zoneIndex)
+              canvas.requestRenderAll()
+            }
+            return
+          }
+          canvas.remove(existing)
+          updateZoneIndicatorVisibility(zoneIndex)
+        }
+
+        const imgEl = document.createElement("img")
+        imgEl.crossOrigin = "anonymous"
+        await new Promise<void>((resolve) => {
+          imgEl.onload = () => resolve()
+          imgEl.onerror = () => resolve()
+          imgEl.src = dataUrl
+        })
+
+        if (!imgEl.naturalWidth || !imgEl.naturalHeight) return
+
+        const maxW = zone.width * 0.9
+        const maxH = zone.height * 0.9
+        const scale = Math.min(maxW / imgEl.naturalWidth, maxH / imgEl.naturalHeight, 1)
+
+        const imageObj = new fabric.FabricImage(imgEl, {
+          left: zone.left + zone.width / 2,
+          top: zone.top + zone.height / 2,
+          originX: "center",
+          originY: "center",
+          scaleX: scale,
+          scaleY: scale,
+        })
+
+        imageObj._autoFitted = true
+        imageObj._zoneIndex = zoneIndex
+        imageObj._fixedToZone = true
+        configureImageObject(imageObj)
+        canvas.add(imageObj)
+        canvas.discardActiveObject()
+        clampObjectInsideZones(imageObj)
+        updateZoneIndicatorVisibility(zoneIndex)
+        canvas.requestRenderAll()
+      }
+
+      const openZoneImagePicker = (zoneIndex: number) => {
+        const fileInput = document.createElement("input")
+        fileInput.type = "file"
+        fileInput.accept = "image/*"
+        fileInput.onchange = () => {
+          const file = fileInput.files?.[0]
+          if (!file) return
+          const reader = new FileReader()
+          reader.onload = async (event) => {
+            const sourceDataUrl = event.target?.result as string
+            if (!sourceDataUrl) return
+            const normalized = await downscaleImageDataUrl(sourceDataUrl)
+            await addImageToZone(zoneIndex, normalized)
+          }
+          reader.readAsDataURL(file)
+        }
+        fileInput.click()
+      }
+
+      canvas.on("mouse:down", (evt: { target?: any }) => {
+        const target = evt?.target
+        if (!target || !target._isZone) return
+        if (target._isZoneIndicator) return
+        const zoneIndex = typeof target._zoneIndex === "number" ? target._zoneIndex : -1
+        if (zoneIndex < 0) return
+        openZoneImagePicker(zoneIndex)
+      })
 
       const pickZoneForObject = (obj: any): PixelZone | null => {
         if (zonesPx.length === 0) return null
@@ -823,17 +1015,32 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
       canvas.on("object:added", (e: { target?: any }) => {
         if (isLoadingRef.current) return
         const obj = e.target
-        if (!obj || obj._isZone || obj._autoFitted) return
+        if (!obj || obj._isZone) return
+        if (obj._autoFitted) {
+          if (obj.type === "image" && typeof obj._zoneIndex === "number") {
+            updateZoneIndicatorVisibility(obj._zoneIndex)
+          }
+          return
+        }
         const zones = imagePlacementZones[viewKey] || []
         if (zones.length === 0) return
-        const z = zones[0]
+        const preferredZoneIndex = typeof obj._preferredZoneIndex === "number" ? obj._preferredZoneIndex : 0
+        const boundedZoneIndex = Math.max(0, Math.min(preferredZoneIndex, zones.length - 1))
+        const z = zones[boundedZoneIndex]
         const zW = z.w * canvasWidth
         const zH = z.h * canvasHeight
         // Auto-scale images to fit zone
         if (obj.type === "image") {
           configureImageObject(obj)
           const s = Math.min(zW / (obj.width || 1), zH / (obj.height || 1)) * 0.9
-          obj.set({ scaleX: s, scaleY: s })
+          obj.set({
+            scaleX: s,
+            scaleY: s,
+            lockMovementX: true,
+            lockMovementY: true,
+          })
+          obj._zoneIndex = boundedZoneIndex
+          obj._fixedToZone = true
         } else {
           // For text, only downscale if larger than zone
           const objW = (obj.width || 0) * (obj.scaleX || 1)
@@ -860,10 +1067,36 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
         if (!obj || obj._isZone) return
         if (obj.type === "image") {
           configureImageObject(obj)
+
+          const zoneIndex = typeof obj._zoneIndex === "number" ? obj._zoneIndex : 0
+          const zone = getZoneByIndex(zoneIndex)
+          if (zone) {
+            obj.set({
+              left: zone.left + zone.width / 2,
+              top: zone.top + zone.height / 2,
+              originX: "center",
+              originY: "center",
+              lockMovementX: true,
+              lockMovementY: true,
+            })
+            enforceMinimumSize(obj, { width: zone.width, height: zone.height })
+          }
         }
         enforceMinimumSize(obj)
         clampObjectInsideZones(obj)
+        if (obj.type === "image" && typeof obj._zoneIndex === "number") {
+          updateZoneIndicatorVisibility(obj._zoneIndex)
+        }
         canvas.requestRenderAll()
+      })
+
+      canvas.on("object:removed", (e: { target?: any }) => {
+        const obj = e.target
+        if (!obj || obj._isZone || obj._isZoneIndicator) return
+        if (obj.type === "image" && typeof obj._zoneIndex === "number") {
+          updateZoneIndicatorVisibility(obj._zoneIndex)
+          canvas.requestRenderAll()
+        }
       })
 
       const pasteFromClipboard = async () => {
@@ -911,7 +1144,7 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
                 })
                 configureImageObject(imageObj)
                 canvas.add(imageObj)
-                canvas.setActiveObject(imageObj)
+                canvas.discardActiveObject()
                 clampObjectInsideZones(imageObj)
                 canvas.requestRenderAll()
                 return
@@ -945,6 +1178,8 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
           // ignore clipboard read errors
         }
       }
+
+      refreshAllZoneIndicators()
 
       // Delete selected object with Delete/Backspace
       const handleKeyDown = (e: KeyboardEvent) => {
@@ -1199,7 +1434,7 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
           const saveKey = isMangas ? primaryMangaKey : activeView
           persistCanvasState(fabricRef.current, saveKey, evt === "object:removed")
           saveToHistory()
-          notifyUpdate()
+          notifyUpdate(evt === "object:removed")
           onCanvasStateChange?.()
         }
       })
@@ -1211,7 +1446,7 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
           if (!isLoadingRef.current) {
             persistCanvasState(fabricRef2.current, secondaryMangaKey, evt === "object:removed")
             saveToHistory()
-            notifyUpdate()
+            notifyUpdate(evt === "object:removed")
             onCanvasStateChange?.()
           }
         })
