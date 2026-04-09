@@ -518,10 +518,10 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
             }
           }
 
-          targetCanvas.renderAll()
           if (typeof targetCanvas.__syncZoneIndicators === "function") {
             targetCanvas.__syncZoneIndicators()
           }
+          targetCanvas.requestRenderAll()
         }
 
         if (isMangas) {
@@ -602,13 +602,26 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
         canvasInstanceMapRef.current.delete(canvasEl)
       }
 
-      const canvas = new fabric.Canvas(canvasEl, {
+      let canvas: any
+      const canvasOptions = {
         width: canvasWidth,
         height: canvasHeight,
         backgroundColor: "rgba(0,0,0,0)",
         // Disable drag-marquee selection to avoid accidental grouped selection overlays.
         selection: false,
-      })
+      }
+      try {
+        canvas = new fabric.Canvas(canvasEl, canvasOptions)
+      } catch {
+        // Recover from stale Fabric instance attached to the same DOM element.
+        const maybeStale = (canvasEl as any).__fabric || (canvasEl as any)._fabric
+        try {
+          maybeStale?.dispose?.()
+        } catch {
+          // ignore stale dispose failures
+        }
+        canvas = new fabric.Canvas(canvasEl, canvasOptions)
+      }
       canvasInstanceMapRef.current.set(canvasEl, canvas)
 
       // Load template background image
@@ -771,9 +784,18 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
         height: z.h * canvasHeight,
       }))
       const zoneIndicators: Record<number, any> = {}
+      const zoneRects: Record<number, any> = {}
 
-      const isImageInZone = (obj: any, zone: PixelZone, zoneIndex: number) => {
-        if (!obj || obj?._isZone || obj?.type !== "image") return false
+      // Build zone rectangle map after template zones have been created.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      canvas.getObjects().forEach((o: any) => {
+        if (o?._isZone && !o?._isZoneIndicator && typeof o?._zoneIndex === "number") {
+          zoneRects[o._zoneIndex] = o
+        }
+      })
+
+      const isObjectInZone = (obj: any, zone: PixelZone, zoneIndex: number) => {
+        if (!obj || obj?._isZone || obj?._isZoneIndicator) return false
         if (obj?._zoneIndex === zoneIndex) return true
 
         const center = typeof obj.getCenterPoint === "function" ? obj.getCenterPoint() : null
@@ -798,6 +820,16 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
         return intersects
       }
 
+      const updateZoneRectState = (zoneIndex: number) => {
+        const rect = zoneRects[zoneIndex]
+        const zone = zonesPx[zoneIndex]
+        if (!rect || !zone) return
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const occupied = canvas.getObjects().some((o: any) => isObjectInZone(o, zone, zoneIndex))
+        rect.evented = !occupied
+        rect.hoverCursor = occupied ? "default" : "pointer"
+      }
+
       const updateZoneIndicatorVisibility = (zoneIndex: number) => {
         const indicator = zoneIndicators[zoneIndex]
         if (!indicator) return
@@ -807,12 +839,13 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
           return
         }
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const hasImage = canvas.getObjects().some((o: any) => isImageInZone(o, zone, zoneIndex))
-        indicator.visible = !hasImage
+        const occupied = canvas.getObjects().some((o: any) => isObjectInZone(o, zone, zoneIndex))
+        indicator.visible = !occupied
         // Send to back to ensure it never appears above images
         if (typeof indicator.sendToBack === "function") {
           indicator.sendToBack()
         }
+        updateZoneRectState(zoneIndex)
       }
 
       const refreshAllZoneIndicators = () => {
@@ -823,7 +856,7 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
         refreshAllZoneIndicators()
         // Always send zone indicators to the back so they never appear over images
         sendZoneIndicatorsToBack()
-        canvas.renderAll()
+        canvas.requestRenderAll()
       }
 
       const sendZoneIndicatorsToBack = () => {
@@ -833,12 +866,7 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
           }
         })
       }
-  syncZoneIndicators()
-      sendZoneIndicatorsToBack()
-      ;(canvas as any).__syncZoneIndicators = () => {
-        syncZoneIndicators()
-        sendZoneIndicatorsToBack()
-      }
+      ;(canvas as any).__syncZoneIndicators = syncZoneIndicators
       zonesPx.forEach((zone, zoneIndex) => {
         const iconColor = "#7c3aed"
         const iconScale = Math.max(1.15, Math.min(2.15, Math.min(zone.width, zone.height) / 62))
@@ -902,6 +930,8 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
           top: zone.top + zone.height / 2,
           originX: "center",
           originY: "center",
+          // Keep hidden until we sync occupancy state to avoid flash on view restore.
+          visible: false,
           selectable: false,
           evented: false,
           excludeFromExport: true,
@@ -912,6 +942,10 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
         zoneIndicators[zoneIndex] = group
         canvas.add(group)
       })
+
+      if (!savedStatesRef.current[viewKey]) {
+        syncZoneIndicators()
+      }
 
       const getZoneByIndex = (zoneIndex: number): PixelZone | null => {
         if (zoneIndex < 0 || zoneIndex >= zonesPx.length) return null
@@ -1077,9 +1111,7 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
         const obj = e.target
         if (!obj || obj._isZone) return
         if (obj._autoFitted) {
-          if (obj.type === "image" && typeof obj._zoneIndex === "number") {
-            updateZoneIndicatorVisibility(obj._zoneIndex)
-          }
+          syncZoneIndicators()
           return
         }
         const zones = imagePlacementZones[viewKey] || []
@@ -1120,6 +1152,7 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
         obj.setCoords()
         enforceMinimumSize(obj, { width: zW, height: zH })
         clampObjectInsideZones(obj)
+        syncZoneIndicators()
       })
 
       canvas.on("object:modified", (e: { target?: any }) => {
@@ -1144,19 +1177,13 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
         }
         enforceMinimumSize(obj)
         clampObjectInsideZones(obj)
-        if (obj.type === "image" && typeof obj._zoneIndex === "number") {
-          updateZoneIndicatorVisibility(obj._zoneIndex)
-        }
-        canvas.requestRenderAll()
+        syncZoneIndicators()
       })
 
       canvas.on("object:removed", (e: { target?: any }) => {
         const obj = e.target
         if (!obj || obj._isZone || obj._isZoneIndicator) return
-        if (obj.type === "image" && typeof obj._zoneIndex === "number") {
-          updateZoneIndicatorVisibility(obj._zoneIndex)
-          canvas.requestRenderAll()
-        }
+        syncZoneIndicators()
       })
 
       const pasteFromClipboard = async () => {
@@ -1239,7 +1266,12 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
         }
       }
 
-      refreshAllZoneIndicators()
+      // If this view has persisted objects, keep indicators hidden until restore finishes.
+      // Otherwise show icons immediately for an empty view.
+      if (!savedStatesRef.current[viewKey]) {
+        syncZoneIndicators()
+        canvas.requestRenderAll()
+      }
 
       // Delete selected object with Delete/Backspace
       const handleKeyDown = (e: KeyboardEvent) => {
@@ -1441,6 +1473,8 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
     if (typeof (fabricRef2.current as any)?.__syncZoneIndicators === "function") {
       ;(fabricRef2.current as any).__syncZoneIndicators()
     }
+    fabricRef.current?.requestRenderAll()
+    fabricRef2.current?.requestRenderAll()
     if (currentInit !== initCountRef.current) return
 
     isLoadingRef.current = false
