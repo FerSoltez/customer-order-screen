@@ -161,9 +161,10 @@ interface FabricEditorProps {
   lastFontFamily?: string
   onLastFontFamilyChange?: (fontFamily: string) => void
   globalHistoryActionAt?: number
+  historyRestoreAt?: number
 }
 
-export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, onCanvasUpdate, initialViewObjects, onViewObjectsChange, onGlobalUndo, onGlobalRedo, canGlobalUndo = false, canGlobalRedo = false, onCanvasStateChange, lastFontFamily, onLastFontFamilyChange, globalHistoryActionAt = 0 }: FabricEditorProps) {
+export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, onCanvasUpdate, initialViewObjects, onViewObjectsChange, onGlobalUndo, onGlobalRedo, canGlobalUndo = false, canGlobalRedo = false, onCanvasStateChange, lastFontFamily, onLastFontFamilyChange, globalHistoryActionAt = 0, historyRestoreAt = 0 }: FabricEditorProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const canvasRef2 = useRef<HTMLCanvasElement>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -310,9 +311,15 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
 
   useEffect(() => {
     if (!initialViewObjects) return
-    // Merge to avoid wiping recently saved views during rapid tab/mold switches.
-    savedStatesRef.current = { ...savedStatesRef.current, ...initialViewObjects }
-  }, [initialViewObjects])
+    // When recovering from a unified historyundo, do a full replace
+    // For normal view switches, merge to avoid wiping recently saved states
+    if (historyRestoreAt > 0) {
+      savedStatesRef.current = { ...initialViewObjects }
+    } else {
+      // Merge to avoid wiping recently saved views during rapid tab/mold switches.
+      savedStatesRef.current = { ...savedStatesRef.current, ...initialViewObjects }
+    }
+  }, [initialViewObjects, historyRestoreAt])
 
   // Also load from parent's localStorage as fallback in case state is not yet synced
   useEffect(() => {

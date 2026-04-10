@@ -118,6 +118,7 @@ export default function PersonalizadorPage() {
   const [showIntroModal, setShowIntroModal] = useState(false)
   const [unifiedHistoryTick, setUnifiedHistoryTick] = useState(0)
   const [globalHistoryActionAt, setGlobalHistoryActionAt] = useState(0)
+  const [historyRestoreTick, setHistoryRestoreTick] = useState(0)
   const [fabricEditorRestoreRevision, setFabricEditorRestoreRevision] = useState(0)
   const [fabricEditorRevision, setFabricEditorRevision] = useState(0)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -498,6 +499,7 @@ export default function PersonalizadorPage() {
     setInitialViewObjects(nextViewObjects)
     setPersistTick((tick) => tick + 1)
     setFabricEditorRestoreRevision((revision) => revision + 1)
+    setHistoryRestoreTick((tick) => tick + 1)
     setUnifiedHistoryTick((tick) => tick + 1)
     composeUVTexture()
   }, [composeUVTexture, normalizeUnifiedHistoryItem])
@@ -849,6 +851,7 @@ export default function PersonalizadorPage() {
                   lastFontFamily={lastFontFamilyRef.current}
                   onLastFontFamilyChange={onLastFontFamilyChange}
                   globalHistoryActionAt={globalHistoryActionAt}
+                  historyRestoreAt={historyRestoreTick}
                 />
               ) : (
                 <div className="flex h-full w-full items-center justify-center">
