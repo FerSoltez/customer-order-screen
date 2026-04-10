@@ -1,6 +1,6 @@
 "use client"
 
-import { Upload, ImageIcon, Type, Palette, X, ChevronDown, ChevronUp } from "lucide-react"
+import { Upload, ImageIcon, Type, Palette, X, ChevronDown, ChevronUp, Layers } from "lucide-react"
 import { useRef, useState, useEffect } from "react"
 import Image from "next/image"
 import { ColorPalette } from "./color-palette"
@@ -9,6 +9,13 @@ interface UploadedImage {
   id: string
   name: string
   dataUrl: string
+}
+
+interface StripedDesignConfig {
+  enabled: boolean
+  color1: string
+  color2: string
+  stripeCount: number
 }
 
 interface ToolbarProps {
@@ -27,6 +34,8 @@ interface ToolbarProps {
   }
   onPartColorChange: (part: "frente" | "espalda" | "manga_izquierda" | "manga_derecha" | "cuello", color: string) => void
   onLastFontFamilyChange?: (fontFamily: string) => void
+  onApplyStripedDesign?: (config: StripedDesignConfig) => void
+  initialStripedDesign?: StripedDesignConfig
 }
 
 const FONT_OPTIONS = [
@@ -37,10 +46,10 @@ const FONT_OPTIONS = [
 
 const MAX_TEXT_LENGTH = 15
 
-export function Toolbar({ onImageUpload, onAddText, onUpdateSelectedTextStyle, onAddUploadedImage, onRemoveUploadedImage, uploadedImages, partColors, onPartColorChange, onLastFontFamilyChange }: ToolbarProps) {
+export function Toolbar({ onImageUpload, onAddText, onUpdateSelectedTextStyle, onAddUploadedImage, onRemoveUploadedImage, uploadedImages, partColors, onPartColorChange, onLastFontFamilyChange, onApplyStripedDesign, initialStripedDesign }: ToolbarProps) {
   const imageInputRef = useRef<HTMLInputElement>(null)
   const toolbarRef = useRef<HTMLDivElement>(null)
-  const [activePanel, setActivePanel] = useState<"colores" | "subidos" | "texto" | null>(null)
+  const [activePanel, setActivePanel] = useState<"colores" | "subidos" | "texto" | "disenos" | null>(null)
   const [expandedParts, setExpandedParts] = useState<Record<string, boolean>>({
     frente: false,
     espalda: false,
@@ -52,8 +61,12 @@ export function Toolbar({ onImageUpload, onAddText, onUpdateSelectedTextStyle, o
   const [selectedFont, setSelectedFont] = useState(FONT_OPTIONS[0].value)
   const [textColor, setTextColor] = useState("#1a1a2e")
   const [textEditMessage, setTextEditMessage] = useState<string | null>(null)
+  const [designColor1, setDesignColor1] = useState(initialStripedDesign?.color1 ?? "#1f4fa6")
+  const [designColor2, setDesignColor2] = useState(initialStripedDesign?.color2 ?? "#58a8f6")
+  const [designStripeCount, setDesignStripeCount] = useState(initialStripedDesign?.stripeCount ?? 5)
+  const [designEnabled, setDesignEnabled] = useState(initialStripedDesign?.enabled ?? false)
 
-  const togglePanel = (panel: "colores" | "subidos" | "texto") => {
+  const togglePanel = (panel: "colores" | "subidos" | "texto" | "disenos") => {
     setActivePanel(activePanel === panel ? null : panel)
   }
 
@@ -77,6 +90,14 @@ export function Toolbar({ onImageUpload, onAddText, onUpdateSelectedTextStyle, o
       document.removeEventListener("mousedown", handleClickOutside)
     }
   }, [activePanel])
+
+  useEffect(() => {
+    if (!initialStripedDesign) return
+    setDesignColor1(initialStripedDesign.color1)
+    setDesignColor2(initialStripedDesign.color2)
+    setDesignStripeCount(initialStripedDesign.stripeCount)
+    setDesignEnabled(initialStripedDesign.enabled)
+  }, [initialStripedDesign])
 
   return (
     <div className="relative flex flex-row items-start gap-0 md:flex-col" ref={toolbarRef}>
@@ -146,6 +167,20 @@ export function Toolbar({ onImageUpload, onAddText, onUpdateSelectedTextStyle, o
           </div>
           <span className="text-[10px] font-medium text-foreground md:text-xs">Texto</span>
         </button>
+
+        {/* Diseños */}
+        <button
+          onClick={() => togglePanel("disenos")}
+          className={`flex flex-col items-center gap-1 rounded-lg p-2 transition-colors ${
+            activePanel === "disenos" ? "bg-secondary" : "hover:bg-secondary/60"
+          }`}
+          title="Diseños"
+        >
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-secondary md:h-12 md:w-12">
+            <Layers className="h-5 w-5 text-primary md:h-6 md:w-6" />
+          </div>
+          <span className="text-[10px] font-medium text-foreground md:text-xs">Diseños</span>
+        </button>
       </div>
 
       {/* Expandable panels */}
@@ -157,7 +192,9 @@ export function Toolbar({ onImageUpload, onAddText, onUpdateSelectedTextStyle, o
                 ? "Colores"
                 : activePanel === "subidos"
                   ? "Archivos Subidos"
-                  : "Agregar Texto"}
+                  : activePanel === "disenos"
+                    ? "Diseños"
+                    : "Agregar Texto"}
             </h3>
             <button
               onClick={() => setActivePanel(null)}
@@ -308,6 +345,103 @@ export function Toolbar({ onImageUpload, onAddText, onUpdateSelectedTextStyle, o
                 {textEditMessage && (
                   <p className="text-xs text-muted-foreground">{textEditMessage}</p>
                 )}
+              </div>
+            )}
+
+            {activePanel === "disenos" && (
+              <div className="flex flex-col gap-4">
+                <div className="rounded-lg border border-border bg-background p-3">
+                  <p className="text-sm font-semibold text-foreground">Rayas Horizontales (Tackle)</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Aplica un patron de rayas alternadas en frente, espalda y mangas respetando el mapa UV.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="flex flex-col gap-1">
+                    <label htmlFor="design-color-1" className="text-xs font-medium text-muted-foreground">
+                      Color 1
+                    </label>
+                    <input
+                      id="design-color-1"
+                      type="color"
+                      value={designColor1}
+                      onChange={(e) => setDesignColor1(e.target.value)}
+                      className="h-9 w-full cursor-pointer rounded-md border border-border bg-background p-1"
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <label htmlFor="design-color-2" className="text-xs font-medium text-muted-foreground">
+                      Color 2
+                    </label>
+                    <input
+                      id="design-color-2"
+                      type="color"
+                      value={designColor2}
+                      onChange={(e) => setDesignColor2(e.target.value)}
+                      className="h-9 w-full cursor-pointer rounded-md border border-border bg-background p-1"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <label htmlFor="design-stripe-count" className="text-xs font-medium text-muted-foreground">
+                    Numero de rayas: {designStripeCount}
+                  </label>
+                  <input
+                    id="design-stripe-count"
+                    type="range"
+                    min={2}
+                    max={10}
+                    step={1}
+                    value={designStripeCount}
+                    onChange={(e) => setDesignStripeCount(Number(e.target.value))}
+                    className="w-full"
+                  />
+                </div>
+
+                <div className="overflow-hidden rounded-lg border border-border">
+                  <div style={{ backgroundColor: designColor1 }} className="h-5 w-full" />
+                  <div style={{ backgroundColor: designColor2 }} className="h-5 w-full" />
+                  <div style={{ backgroundColor: designColor1 }} className="h-5 w-full" />
+                  <div style={{ backgroundColor: designColor2 }} className="h-5 w-full" />
+                </div>
+
+                <button
+                  onClick={() => {
+                    const nextEnabled = true
+                    setDesignEnabled(nextEnabled)
+                    onApplyStripedDesign?.({
+                      enabled: nextEnabled,
+                      color1: designColor1,
+                      color2: designColor2,
+                      stripeCount: designStripeCount,
+                    })
+                  }}
+                  className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-primary-foreground transition-colors hover:bg-primary/90"
+                >
+                  Aplicar Tackle
+                </button>
+
+                <button
+                  onClick={() => {
+                    setDesignEnabled(false)
+                    onApplyStripedDesign?.({
+                      enabled: false,
+                      color1: designColor1,
+                      color2: designColor2,
+                      stripeCount: designStripeCount,
+                    })
+                  }}
+                  className="rounded-lg border border-border bg-card px-4 py-2 text-sm font-bold text-foreground transition-colors hover:bg-secondary"
+                >
+                  Quitar diseno
+                </button>
+
+                <p className="text-xs text-muted-foreground">
+                  Estado: {designEnabled ? "Activo" : "Inactivo"}
+                </p>
               </div>
             )}
 

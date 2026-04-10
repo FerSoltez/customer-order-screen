@@ -50,33 +50,99 @@ function TShirtModel({ bodyColor, textureCanvas, textureRevision = 0, onReady }:
     nextTexture.anisotropy = maxAnisotropy
     nextTexture.needsUpdate = true
 
+    let exteriorTargetCount = 0
+    let fallbackAppliedCount = 0
+
     clonedScene.traverse((child) => {
       if ((child as THREE.Mesh).isMesh) {
         const mesh = child as THREE.Mesh
         const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
         materials.forEach((mat) => {
-          if (mat && (mat as THREE.MeshStandardMaterial).isMeshStandardMaterial) {
-            const stdMat = mat as THREE.MeshStandardMaterial
-            // Keep inner layer white
-            if (mesh.name === "Camisa_Interior" || mesh.name === "Interior_Negro") {
-              stdMat.color.setHex(0xffffff)
-              stdMat.roughness = 1
-              if (stdMat.map) {
-                stdMat.map.dispose()
-              }
-              stdMat.map = null
-            } else {
-              // Dispose old GPU texture before replacing map to prevent VRAM leaks.
-              if (stdMat.map && stdMat.map !== nextTexture) {
-                stdMat.map.dispose()
-              }
-              stdMat.map = nextTexture
+          if (!mat) return
+
+          const textureMat = mat as THREE.Material & {
+            map?: THREE.Texture | null
+            color?: THREE.Color
+            roughness?: number
+            needsUpdate: boolean
+            name?: string
+          }
+
+          const meshName = (mesh.name || "").toLowerCase()
+          const materialName = (textureMat.name || "").toLowerCase()
+          const isInterior =
+            meshName.includes("interior") ||
+            materialName.includes("interior")
+          const isExteriorTarget =
+            meshName === "camisa_exterior" ||
+            materialName === "camisa_exterior" ||
+            meshName.includes("camisa_exterior") ||
+            materialName.includes("camisa_exterior") ||
+            meshName.includes("exterior") ||
+            materialName.includes("exterior")
+
+          // Keep inner layer plain, without UV texture.
+          if (isInterior) {
+            if (textureMat.color) {
+              textureMat.color.setHex(0xffffff)
             }
-            stdMat.needsUpdate = true
+            if (typeof textureMat.roughness === "number") {
+              textureMat.roughness = 1
+            }
+            if (textureMat.map === appliedTextureRef.current) {
+              textureMat.map = null
+            }
+            textureMat.needsUpdate = true
+            return
+          }
+
+          if (isExteriorTarget) {
+            if (textureMat.color) {
+              // Neutral base color so the map is shown with exact UV colors.
+              textureMat.color.setHex(0xffffff)
+            }
+            textureMat.map = nextTexture
+            textureMat.needsUpdate = true
+            exteriorTargetCount += 1
           }
         })
       }
     })
+
+    // Fallback: if no explicit Camisa_Exterior match was found, apply to all non-interior meshes.
+    if (exteriorTargetCount === 0) {
+      clonedScene.traverse((child) => {
+        if (!(child as THREE.Mesh).isMesh) return
+        const mesh = child as THREE.Mesh
+        const meshName = (mesh.name || "").toLowerCase()
+        if (meshName.includes("interior")) return
+
+        const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+        materials.forEach((mat) => {
+          if (!mat) return
+          const textureMat = mat as THREE.Material & {
+            map?: THREE.Texture | null
+            color?: THREE.Color
+            needsUpdate: boolean
+            name?: string
+          }
+          const materialName = (textureMat.name || "").toLowerCase()
+          if (materialName.includes("interior")) return
+
+          if (textureMat.color) {
+            textureMat.color.setHex(0xffffff)
+          }
+          textureMat.map = nextTexture
+          textureMat.needsUpdate = true
+          fallbackAppliedCount += 1
+        })
+      })
+    }
+
+    if (exteriorTargetCount === 0 && fallbackAppliedCount === 0) {
+      console.warn("[TShirtPreview3D] No se encontro destino para la textura UV en el modelo.")
+    }
+
     if (appliedTextureRef.current && appliedTextureRef.current !== nextTexture) {
       appliedTextureRef.current.dispose()
     }

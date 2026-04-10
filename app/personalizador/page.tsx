@@ -7,6 +7,7 @@ import { Footer } from "@/components/ui/footer"
 import { Toolbar } from "@/components/ui/toolbar"
 import { FabricEditor } from "@/components/ui/fabric-editor"
 import { TemplateSelector, type TemplateView } from "@/components/ui/template-selector"
+import { useStripedDesignTexture } from "@/hooks/use-striped-design-texture"
 import { AlertDialog, AlertDialogContent, AlertDialogDescription, AlertDialogHeader, AlertDialogTitle, AlertDialogAction, AlertDialogCancel } from "@/components/ui/alert-dialog"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { AlertTriangle } from "lucide-react"
@@ -72,6 +73,13 @@ interface PartColors {
   cuello: string
 }
 
+interface StripedDesignConfig {
+  enabled: boolean
+  color1: string
+  color2: string
+  stripeCount: number
+}
+
 interface UnifiedHistoryItem {
   partColors: PartColors
   viewObjects: Record<string, string>
@@ -102,6 +110,13 @@ const DEFAULT_PART_COLORS: PartColors = {
   cuello: "#ffffff",
 }
 
+const DEFAULT_STRIPED_DESIGN: StripedDesignConfig = {
+  enabled: false,
+  color1: "#1f4fa6",
+  color2: "#58a8f6",
+  stripeCount: 5,
+}
+
 export default function PersonalizadorPage() {
   const [activeView, setActiveView] = useState<TemplateView>("frente")
   const [bodyColor, setBodyColor] = useState("#393d42")
@@ -116,6 +131,7 @@ export default function PersonalizadorPage() {
   const [showCancelConfirm, setShowCancelConfirm] = useState(false)
   const [showSaveConfirm, setShowSaveConfirm] = useState(false)
   const [showIntroModal, setShowIntroModal] = useState(false)
+  const [stripedDesign, setStripedDesign] = useState<StripedDesignConfig>(DEFAULT_STRIPED_DESIGN)
   const [unifiedHistoryTick, setUnifiedHistoryTick] = useState(0)
   const [globalHistoryActionAt, setGlobalHistoryActionAt] = useState(0)
   const [historyRestoreTick, setHistoryRestoreTick] = useState(0)
@@ -127,6 +143,7 @@ export default function PersonalizadorPage() {
   const viewObjectsRef = useRef<Record<string, string>>({})
   const partColorsRef = useRef<PartColors>(partColors)
   const uploadedImagesRef = useRef<UploadedImage[]>(uploadedImages)
+  const stripedDesignRef = useRef<StripedDesignConfig>(DEFAULT_STRIPED_DESIGN)
   const unifiedHistoryRef = useRef<UnifiedHistoryItem[]>([])
   const unifiedHistoryIndexRef = useRef(-1)
   const pendingCanvasHistoryRef = useRef(false)
@@ -134,10 +151,19 @@ export default function PersonalizadorPage() {
   const compositeCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const composeIdRef = useRef(0)
   const imageCacheRef = useRef<Record<string, HTMLImageElement>>({})
+  const stripedDesignCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const composePendingRef = useRef<NodeJS.Timeout | null>(null)
   const composeIsRunningRef = useRef(false)
   const rafIdRef = useRef<number | null>(null)
   const activeViewRef = useRef<TemplateView>("frente")
+
+  const stripedDesignTexture = useStripedDesignTexture({
+    color1: stripedDesign.color1,
+    color2: stripedDesign.color2,
+    stripeCount: stripedDesign.stripeCount,
+    resolution: TEXTURE_SIZE,
+    enabled: stripedDesign.enabled,
+  })
 
   useEffect(() => {
     document.title = "Dark Lion - Personalizador 3D"
@@ -247,6 +273,15 @@ export default function PersonalizadorPage() {
     lastFontFamilyRef.current = fontFamily
   }, [])
 
+  useEffect(() => {
+    stripedDesignRef.current = stripedDesign
+  }, [stripedDesign])
+
+  useEffect(() => {
+    const image = stripedDesignTexture?.image
+    stripedDesignCanvasRef.current = image instanceof HTMLCanvasElement ? image : null
+  }, [stripedDesignTexture])
+
   // Store compose function in ref to avoid dependency issues
   const composeUVTextureRef = useRef<() => Promise<void>>(async () => {})
 
@@ -311,6 +346,31 @@ export default function PersonalizadorPage() {
         ctx.fillRect(left, top, right - left, bottom - top)
       })
 
+      // Overlay Tackle striped design before user uploads/texts, so user content stays on top.
+      if (stripedDesignRef.current.enabled) {
+        if (stripedDesignCanvasRef.current) {
+          ctx.drawImage(stripedDesignCanvasRef.current, 0, 0, TEXTURE_SIZE, TEXTURE_SIZE)
+        } else {
+          // Fallback: draw stripes directly to avoid transient disappearance if hook texture is not ready.
+          const safeStripeCount = Math.max(1, Math.floor(stripedDesignRef.current.stripeCount || 1))
+          Object.values(UV_REGIONS).forEach((region) => {
+            const px = region.x * TEXTURE_SIZE
+            const py = region.y * TEXTURE_SIZE
+            const pw = region.w * TEXTURE_SIZE
+            const ph = region.h * TEXTURE_SIZE
+            const stripeHeight = ph / safeStripeCount
+
+            for (let i = 0; i < safeStripeCount; i++) {
+              const top = py + stripeHeight * i
+              const nextTop = i === safeStripeCount - 1 ? py + ph : py + stripeHeight * (i + 1)
+              const height = Math.max(0, nextTop - top)
+              ctx.fillStyle = i % 2 === 0 ? stripedDesignRef.current.color1 : stripedDesignRef.current.color2
+              ctx.fillRect(px, top, pw, height)
+            }
+          })
+        }
+      }
+
       // Load all per-view images (use cache to avoid reloading)
       const entries = Object.entries(viewContentRef.current).filter(([, url]) => !!url)
       const loaded: { view: string; img: HTMLImageElement }[] = []
@@ -373,6 +433,11 @@ export default function PersonalizadorPage() {
 
   const composeUVTexture = useCallback(() => {
     composeUVTextureRef.current()
+  }, [])
+
+  const handleApplyStripedDesign = useCallback((config: StripedDesignConfig) => {
+    stripedDesignRef.current = config
+    setStripedDesign(config)
   }, [])
 
   const persistStateNow = useCallback(() => {
@@ -582,6 +647,14 @@ export default function PersonalizadorPage() {
   useEffect(() => {
     uploadedImagesRef.current = uploadedImages
   }, [uploadedImages])
+
+  useEffect(() => {
+    composeUVTexture()
+  }, [composeUVTexture, stripedDesignTexture])
+
+  useEffect(() => {
+    composeUVTexture()
+  }, [composeUVTexture, stripedDesign])
 
   useEffect(() => {
     activeViewRef.current = activeView
@@ -829,6 +902,8 @@ export default function PersonalizadorPage() {
                 partColors={partColors}
                 onPartColorChange={handlePartColorChange}
                 onLastFontFamilyChange={onLastFontFamilyChange}
+                onApplyStripedDesign={handleApplyStripedDesign}
+                initialStripedDesign={stripedDesign}
               />
             </div>
 
