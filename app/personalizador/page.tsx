@@ -7,7 +7,6 @@ import { Footer } from "@/components/ui/footer"
 import { Toolbar } from "@/components/ui/toolbar"
 import { FabricEditor } from "@/components/ui/fabric-editor"
 import { TemplateSelector, type TemplateView } from "@/components/ui/template-selector"
-import { useStripedDesignTexture } from "@/hooks/use-striped-design-texture"
 import { AlertDialog, AlertDialogContent, AlertDialogDescription, AlertDialogHeader, AlertDialogTitle, AlertDialogAction, AlertDialogCancel } from "@/components/ui/alert-dialog"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { AlertTriangle } from "lucide-react"
@@ -63,25 +62,10 @@ const VIEW_CONTENT_SCALE: Partial<Record<UVViewKey, { x: number; y: number }>> =
 // 2048x2048 is the best quality/performance compromise for dynamic apparel textures.
 const TEXTURE_SIZE = 2048
 const INTRO_MODAL_KEY = "darklion-personalizador-intro-v1"
+const FABRIC_HISTORY_STORAGE_KEY = "darklion-personalizador-history-v1"
 const MAX_TEXT_LENGTH = 15
 
-interface PartColors {
-  frente: string
-  espalda: string
-  manga_izquierda: string
-  manga_derecha: string
-  cuello: string
-}
-
-interface StripedDesignConfig {
-  enabled: boolean
-  color1: string
-  color2: string
-  stripeCount: number
-}
-
 interface UnifiedHistoryItem {
-  partColors: PartColors
   viewObjects: Record<string, string>
   viewContent: Record<string, string>
   uploadedImages: UploadedImage[]
@@ -94,7 +78,6 @@ interface PersistedUnifiedHistory {
 
 interface PersistedPersonalizadorState {
   activeView?: TemplateView
-  partColors?: PartColors
   uploadedImages?: UploadedImage[]
   viewObjects?: Record<string, string>
   viewContent?: Record<string, string>
@@ -102,25 +85,10 @@ interface PersistedPersonalizadorState {
 }
 
 const STORAGE_KEY = "darklion-personalizador-3d-v1"
-const DEFAULT_PART_COLORS: PartColors = {
-  frente: "#ffffff",
-  espalda: "#ffffff",
-  manga_izquierda: "#ffffff",
-  manga_derecha: "#ffffff",
-  cuello: "#ffffff",
-}
-
-const DEFAULT_STRIPED_DESIGN: StripedDesignConfig = {
-  enabled: false,
-  color1: "#1f4fa6",
-  color2: "#58a8f6",
-  stripeCount: 5,
-}
 
 export default function PersonalizadorPage() {
   const [activeView, setActiveView] = useState<TemplateView>("frente")
   const [bodyColor, setBodyColor] = useState("#393d42")
-  const [partColors, setPartColors] = useState<PartColors>(DEFAULT_PART_COLORS)
   const [textureCanvas, setTextureCanvas] = useState<HTMLCanvasElement | null>(null)
   const [textureRevision, setTextureRevision] = useState(0)
   const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([])
@@ -131,7 +99,6 @@ export default function PersonalizadorPage() {
   const [showCancelConfirm, setShowCancelConfirm] = useState(false)
   const [showSaveConfirm, setShowSaveConfirm] = useState(false)
   const [showIntroModal, setShowIntroModal] = useState(false)
-  const [stripedDesign, setStripedDesign] = useState<StripedDesignConfig>(DEFAULT_STRIPED_DESIGN)
   const [unifiedHistoryTick, setUnifiedHistoryTick] = useState(0)
   const [globalHistoryActionAt, setGlobalHistoryActionAt] = useState(0)
   const [historyRestoreTick, setHistoryRestoreTick] = useState(0)
@@ -141,29 +108,16 @@ export default function PersonalizadorPage() {
   const fabricCanvasRef = useRef<any>(null)
   const viewContentRef = useRef<Record<string, string>>({})
   const viewObjectsRef = useRef<Record<string, string>>({})
-  const partColorsRef = useRef<PartColors>(partColors)
   const uploadedImagesRef = useRef<UploadedImage[]>(uploadedImages)
-  const stripedDesignRef = useRef<StripedDesignConfig>(DEFAULT_STRIPED_DESIGN)
   const unifiedHistoryRef = useRef<UnifiedHistoryItem[]>([])
   const unifiedHistoryIndexRef = useRef(-1)
   const pendingCanvasHistoryRef = useRef(false)
   const lastFontFamilyRef = useRef<string>("Inter, sans-serif")
   const compositeCanvasRef = useRef<HTMLCanvasElement | null>(null)
-  const composeIdRef = useRef(0)
   const imageCacheRef = useRef<Record<string, HTMLImageElement>>({})
-  const stripedDesignCanvasRef = useRef<HTMLCanvasElement | null>(null)
-  const composePendingRef = useRef<NodeJS.Timeout | null>(null)
   const composeIsRunningRef = useRef(false)
-  const rafIdRef = useRef<number | null>(null)
+  const composeNeedsRerunRef = useRef(false)
   const activeViewRef = useRef<TemplateView>("frente")
-
-  const stripedDesignTexture = useStripedDesignTexture({
-    color1: stripedDesign.color1,
-    color2: stripedDesign.color2,
-    stripeCount: stripedDesign.stripeCount,
-    resolution: TEXTURE_SIZE,
-    enabled: stripedDesign.enabled,
-  })
 
   useEffect(() => {
     document.title = "Dark Lion - Personalizador 3D"
@@ -171,7 +125,6 @@ export default function PersonalizadorPage() {
 
   const normalizeUnifiedHistoryItem = useCallback((item?: Partial<UnifiedHistoryItem> | null): UnifiedHistoryItem => {
     return {
-      partColors: { ...DEFAULT_PART_COLORS, ...(item?.partColors ?? {}) },
       viewObjects: { ...(item?.viewObjects ?? {}) },
       viewContent: { ...(item?.viewContent ?? {}) },
       uploadedImages: Array.isArray(item?.uploadedImages) ? [...item.uploadedImages] : [],
@@ -184,7 +137,6 @@ export default function PersonalizadorPage() {
       const parsed = raw ? (JSON.parse(raw) as PersistedPersonalizadorState) : null
 
       const nextActiveView = parsed?.activeView ?? "frente"
-      const nextPartColorsFromState = { ...DEFAULT_PART_COLORS, ...(parsed?.partColors ?? {}) }
       const nextViewObjects = (parsed?.viewObjects && typeof parsed.viewObjects === "object")
         ? parsed.viewObjects
         : {}
@@ -199,13 +151,11 @@ export default function PersonalizadorPage() {
       const hasPersistedUnified = !!persistedUnified && Array.isArray(persistedUnified.stack) && persistedUnified.stack.length > 0
       const compactUnifiedStack: UnifiedHistoryItem[] = hasPersistedUnified
         ? persistedUnified.stack.map((item) => ({
-            partColors: { ...DEFAULT_PART_COLORS, ...(item?.partColors ?? {}) },
-            viewObjects: {},
-            viewContent: {},
-            uploadedImages: [],
+            viewObjects: { ...(item?.viewObjects ?? {}) },
+            viewContent: { ...(item?.viewContent ?? {}) },
+            uploadedImages: Array.isArray(item?.uploadedImages) ? [...item.uploadedImages] : [],
           }))
         : [{
-            partColors: nextPartColorsFromState,
             viewObjects: {},
             viewContent: {},
             uploadedImages: [],
@@ -213,34 +163,27 @@ export default function PersonalizadorPage() {
       const compactUnifiedIndex = hasPersistedUnified
         ? Math.max(0, Math.min(persistedUnified!.index ?? 0, compactUnifiedStack.length - 1))
         : 0
-      const nextPartColors = compactUnifiedStack[compactUnifiedIndex]?.partColors ?? nextPartColorsFromState
 
       activeViewRef.current = nextActiveView
-      partColorsRef.current = nextPartColors
       viewObjectsRef.current = nextViewObjects
       viewContentRef.current = nextViewContent
       uploadedImagesRef.current = nextUploadedImages
 
       setActiveView(nextActiveView)
-      setPartColors(nextPartColors)
       setInitialViewObjects(nextViewObjects)
       setUploadedImages(nextUploadedImages)
 
       unifiedHistoryRef.current = compactUnifiedStack
       unifiedHistoryIndexRef.current = compactUnifiedIndex
     } catch {
-      const fallbackColors = { ...DEFAULT_PART_COLORS }
       activeViewRef.current = "frente"
-      partColorsRef.current = fallbackColors
       viewObjectsRef.current = {}
       viewContentRef.current = {}
       uploadedImagesRef.current = []
       setActiveView("frente")
-      setPartColors(fallbackColors)
       setInitialViewObjects({})
       setUploadedImages([])
       unifiedHistoryRef.current = [{
-        partColors: fallbackColors,
         viewObjects: {},
         viewContent: {},
         uploadedImages: [],
@@ -273,160 +216,85 @@ export default function PersonalizadorPage() {
     lastFontFamilyRef.current = fontFamily
   }, [])
 
-  useEffect(() => {
-    stripedDesignRef.current = stripedDesign
-  }, [stripedDesign])
-
-  useEffect(() => {
-    const image = stripedDesignTexture?.image
-    stripedDesignCanvasRef.current = image instanceof HTMLCanvasElement ? image : null
-  }, [stripedDesignTexture])
-
   // Store compose function in ref to avoid dependency issues
   const composeUVTextureRef = useRef<() => Promise<void>>(async () => {})
 
   useEffect(() => {
-    // Only define composeUVTexture logic once on mount or activeView change
     composeUVTextureRef.current = async () => {
-      if (composeIsRunningRef.current) return // Skip if already composing
+      if (composeIsRunningRef.current) {
+        composeNeedsRerunRef.current = true
+        return
+      }
+
       composeIsRunningRef.current = true
-      
+
       try {
-      const currentId = ++composeIdRef.current
-
-      if (!compositeCanvasRef.current) {
-        compositeCanvasRef.current = document.createElement("canvas")
-        compositeCanvasRef.current.width = TEXTURE_SIZE
-        compositeCanvasRef.current.height = TEXTURE_SIZE
-      }
-
-      const cvs = compositeCanvasRef.current
-      const ctx = cvs.getContext("2d")
-      if (!ctx) return
-      ctx.imageSmoothingEnabled = true
-      ctx.imageSmoothingQuality = "high"
-
-      // Fill neutral base first
-      ctx.fillStyle = "#ffffff"
-      ctx.fillRect(0, 0, TEXTURE_SIZE, TEXTURE_SIZE)
-
-      // Apply base color by model part with padding to reduce edge seams
-      const regionPadding = 10
-      Object.entries(UV_REGIONS).forEach(([partKey, region]) => {
-        const color = partColorsRef.current[partKey as keyof PartColors] ?? "#ffffff"
-        ctx.fillStyle = color
-        const px = region.x * TEXTURE_SIZE
-        const py = region.y * TEXTURE_SIZE
-        const pw = region.w * TEXTURE_SIZE
-        const ph = region.h * TEXTURE_SIZE
-        const left = Math.max(0, px - regionPadding)
-        const top = Math.max(0, py - regionPadding)
-        const right = Math.min(TEXTURE_SIZE, px + pw + regionPadding)
-        const bottom = Math.min(TEXTURE_SIZE, py + ph + regionPadding)
-        ctx.fillRect(
-          left,
-          top,
-          right - left,
-          bottom - top
-        )
-      })
-
-      // Neck front/back share one color control (cuello)
-      const neckColor = partColorsRef.current.cuello ?? "#ffffff"
-      ctx.fillStyle = neckColor
-      Object.values(NECK_REGIONS).forEach((region) => {
-        const px = region.x * TEXTURE_SIZE
-        const py = region.y * TEXTURE_SIZE
-        const pw = region.w * TEXTURE_SIZE
-        const ph = region.h * TEXTURE_SIZE
-        const left = Math.max(0, px - regionPadding)
-        const top = Math.max(0, py - regionPadding)
-        const right = Math.min(TEXTURE_SIZE, px + pw + regionPadding)
-        const bottom = Math.min(TEXTURE_SIZE, py + ph + regionPadding)
-        ctx.fillRect(left, top, right - left, bottom - top)
-      })
-
-      // Overlay Tackle striped design before user uploads/texts, so user content stays on top.
-      if (stripedDesignRef.current.enabled) {
-        if (stripedDesignCanvasRef.current) {
-          ctx.drawImage(stripedDesignCanvasRef.current, 0, 0, TEXTURE_SIZE, TEXTURE_SIZE)
-        } else {
-          // Fallback: draw stripes directly to avoid transient disappearance if hook texture is not ready.
-          const safeStripeCount = Math.max(1, Math.floor(stripedDesignRef.current.stripeCount || 1))
-          Object.values(UV_REGIONS).forEach((region) => {
-            const px = region.x * TEXTURE_SIZE
-            const py = region.y * TEXTURE_SIZE
-            const pw = region.w * TEXTURE_SIZE
-            const ph = region.h * TEXTURE_SIZE
-            const stripeHeight = ph / safeStripeCount
-
-            for (let i = 0; i < safeStripeCount; i++) {
-              const top = py + stripeHeight * i
-              const nextTop = i === safeStripeCount - 1 ? py + ph : py + stripeHeight * (i + 1)
-              const height = Math.max(0, nextTop - top)
-              ctx.fillStyle = i % 2 === 0 ? stripedDesignRef.current.color1 : stripedDesignRef.current.color2
-              ctx.fillRect(px, top, pw, height)
-            }
-          })
+        if (!compositeCanvasRef.current) {
+          compositeCanvasRef.current = document.createElement("canvas")
+          compositeCanvasRef.current.width = TEXTURE_SIZE
+          compositeCanvasRef.current.height = TEXTURE_SIZE
         }
-      }
 
-      // Load all per-view images (use cache to avoid reloading)
-      const entries = Object.entries(viewContentRef.current).filter(([, url]) => !!url)
-      const loaded: { view: string; img: HTMLImageElement }[] = []
+        const cvs = compositeCanvasRef.current
+        const ctx = cvs.getContext("2d")
+        if (!ctx) return
 
-      await Promise.all(
-        entries.map(
-          ([view, dataUrl]) =>
-            new Promise<void>((resolve) => {
-              // Check cache first
-              if (imageCacheRef.current[dataUrl]) {
-                loaded.push({ view, img: imageCacheRef.current[dataUrl] })
-                resolve()
-                return
-              }
+        ctx.imageSmoothingEnabled = true
+        ctx.imageSmoothingQuality = "high"
+        ctx.clearRect(0, 0, TEXTURE_SIZE, TEXTURE_SIZE)
+        ctx.fillStyle = "#ffffff"
+        ctx.fillRect(0, 0, TEXTURE_SIZE, TEXTURE_SIZE)
 
-              const img = new Image()
-              img.onload = () => {
-                imageCacheRef.current[dataUrl] = img // Cache the loaded image
-                loaded.push({ view, img })
-                resolve()
-              }
-              img.onerror = () => resolve()
-              img.src = dataUrl
-            })
+        const entries = Object.entries(viewContentRef.current).filter(([, url]) => !!url)
+        const loaded: { view: string; img: HTMLImageElement }[] = []
+
+        await Promise.all(
+          entries.map(
+            ([view, dataUrl]) =>
+              new Promise<void>((resolve) => {
+                if (imageCacheRef.current[dataUrl]) {
+                  loaded.push({ view, img: imageCacheRef.current[dataUrl] })
+                  resolve()
+                  return
+                }
+
+                const img = new Image()
+                img.onload = () => {
+                  imageCacheRef.current[dataUrl] = img
+                  loaded.push({ view, img })
+                  resolve()
+                }
+                img.onerror = () => resolve()
+                img.src = dataUrl
+              })
+          )
         )
-      )
 
-      if (currentId !== composeIdRef.current) return
+        for (const { view, img } of loaded) {
+          const r = UV_REGIONS[view]
+          if (!r) continue
 
-      // Draw each view's user content at its UV position
-      for (const { view, img } of loaded) {
-        const r = UV_REGIONS[view]
-        if (!r) continue
+          const scale = VIEW_CONTENT_SCALE[view as UVViewKey] ?? { x: 1, y: 1 }
+          const baseW = r.w * TEXTURE_SIZE
+          const baseH = r.h * TEXTURE_SIZE
+          const drawW = baseW * scale.x
+          const drawH = baseH * scale.y
+          const drawX = r.x * TEXTURE_SIZE + (baseW - drawW) / 2
+          const drawY = r.y * TEXTURE_SIZE + (baseH - drawH) / 2
 
-        const scale = VIEW_CONTENT_SCALE[view as UVViewKey] ?? { x: 1, y: 1 }
-        const baseW = r.w * TEXTURE_SIZE
-        const baseH = r.h * TEXTURE_SIZE
-        const drawW = baseW * scale.x
-        const drawH = baseH * scale.y
-        const drawX = r.x * TEXTURE_SIZE + (baseW - drawW) / 2
-        const drawY = r.y * TEXTURE_SIZE + (baseH - drawH) / 2
+          ctx.drawImage(img, drawX, drawY, drawW, drawH)
+        }
 
-        ctx.drawImage(
-          img,
-          drawX,
-          drawY,
-          drawW,
-          drawH
-        )
-      }
-
-      if (currentId !== composeIdRef.current) return
-      setTextureCanvas(cvs)
-      setTextureRevision((v) => v + 1)
+        setTextureCanvas(cvs)
+        setTextureRevision((v) => v + 1)
       } finally {
         composeIsRunningRef.current = false
+        if (composeNeedsRerunRef.current) {
+          composeNeedsRerunRef.current = false
+          queueMicrotask(() => {
+            void composeUVTextureRef.current()
+          })
+        }
       }
     }
   }, [])
@@ -435,52 +303,18 @@ export default function PersonalizadorPage() {
     composeUVTextureRef.current()
   }, [])
 
-  const handleApplyStripedDesign = useCallback((config: StripedDesignConfig) => {
-    stripedDesignRef.current = config
-    setStripedDesign(config)
-  }, [])
-
   const persistStateNow = useCallback(() => {
     if (!isPersistenceReady) return
     try {
-      const compactUnifiedStack: UnifiedHistoryItem[] = []
-      let compactUnifiedIndex = 0
-      let lastColorKey = ""
-
-      unifiedHistoryRef.current.forEach((item, idx) => {
-        const normalizedColors = { ...DEFAULT_PART_COLORS, ...(item?.partColors ?? {}) }
-        const colorKey = JSON.stringify(normalizedColors)
-        if (idx === 0 || colorKey !== lastColorKey) {
-          compactUnifiedStack.push({
-            partColors: normalizedColors,
-            viewObjects: {},
-            viewContent: {},
-            uploadedImages: [],
-          })
-          lastColorKey = colorKey
-        }
-        if (idx <= unifiedHistoryIndexRef.current) {
-          compactUnifiedIndex = compactUnifiedStack.length - 1
-        }
-      })
-
-      if (compactUnifiedStack.length === 0) {
-        compactUnifiedStack.push({
-          partColors: { ...DEFAULT_PART_COLORS },
-          viewObjects: {},
-          viewContent: {},
-          uploadedImages: [],
-        })
-        compactUnifiedIndex = 0
-      }
+      const serializedHistory = unifiedHistoryRef.current.map((item) => normalizeUnifiedHistoryItem(item))
+      const serializedIndex = Math.max(0, Math.min(unifiedHistoryIndexRef.current, serializedHistory.length - 1))
 
       const payload: PersistedPersonalizadorState = {
         activeView: activeViewRef.current,
-        partColors: partColorsRef.current,
         viewObjects: viewObjectsRef.current,
         unifiedHistory: {
-          stack: compactUnifiedStack,
-          index: Math.max(0, Math.min(compactUnifiedIndex, compactUnifiedStack.length - 1)),
+          stack: serializedHistory,
+          index: serializedIndex,
         },
       }
       localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
@@ -513,7 +347,6 @@ export default function PersonalizadorPage() {
 
   const createUnifiedHistorySnapshot = useCallback((overrides?: Partial<UnifiedHistoryItem>): UnifiedHistoryItem => {
     return normalizeUnifiedHistoryItem({
-      partColors: overrides?.partColors ?? partColorsRef.current,
       viewObjects: overrides?.viewObjects ?? viewObjectsRef.current,
       viewContent: overrides?.viewContent ?? viewContentRef.current,
       uploadedImages: overrides?.uploadedImages ?? uploadedImagesRef.current,
@@ -536,7 +369,6 @@ export default function PersonalizadorPage() {
 
   const applyUnifiedHistorySnapshot = useCallback((snapshot: UnifiedHistoryItem) => {
     const normalizedSnapshot = normalizeUnifiedHistoryItem(snapshot)
-    const nextPartColors = normalizedSnapshot.partColors
     const snapshotHasViewObjects = Object.keys(normalizedSnapshot.viewObjects).length > 0
     const nextViewObjects = snapshotHasViewObjects
       ? normalizedSnapshot.viewObjects
@@ -554,12 +386,10 @@ export default function PersonalizadorPage() {
       ? normalizedSnapshot.uploadedImages
       : uploadedImagesRef.current
 
-    partColorsRef.current = nextPartColors
     viewObjectsRef.current = nextViewObjects
     viewContentRef.current = nextViewContent
     uploadedImagesRef.current = nextUploadedImages
 
-    setPartColors(nextPartColors)
     setUploadedImages(nextUploadedImages)
     setInitialViewObjects(nextViewObjects)
     setPersistTick((tick) => tick + 1)
@@ -575,17 +405,6 @@ export default function PersonalizadorPage() {
     queueMicrotask(() => {
       pendingCanvasHistoryRef.current = false
       recordUnifiedHistory()
-    })
-  }, [recordUnifiedHistory])
-
-  const handlePartColorChange = useCallback((part: keyof PartColors, color: string) => {
-    setPartColors((prev) => {
-      if (prev[part] === color) return prev
-      const next = { ...prev, [part]: color }
-      partColorsRef.current = next
-      setGlobalHistoryActionAt(Date.now())
-      recordUnifiedHistory({ partColors: next })
-      return next
     })
   }, [recordUnifiedHistory])
 
@@ -613,48 +432,8 @@ export default function PersonalizadorPage() {
   const canUnifiedRedo = unifiedHistoryIndexRef.current < unifiedHistoryRef.current.length - 1
 
   useEffect(() => {
-    partColorsRef.current = partColors
-    
-    // Clear any pending timeout
-    if (composePendingRef.current) {
-      clearTimeout(composePendingRef.current)
-    }
-    
-    // Cancel any pending RAF
-    if (rafIdRef.current !== null) {
-      cancelAnimationFrame(rafIdRef.current)
-    }
-    
-    // Use requestAnimationFrame for smooth 60fps, bound to browser repaint cycle
-    // Only compose if not already running
-    if (!composeIsRunningRef.current) {
-      rafIdRef.current = requestAnimationFrame(() => {
-        composeUVTexture()
-        rafIdRef.current = null
-      })
-    }
-    
-    return () => {
-      if (composePendingRef.current) {
-        clearTimeout(composePendingRef.current)
-      }
-      if (rafIdRef.current !== null) {
-        cancelAnimationFrame(rafIdRef.current)
-      }
-    }
-  }, [partColors])
-
-  useEffect(() => {
     uploadedImagesRef.current = uploadedImages
   }, [uploadedImages])
-
-  useEffect(() => {
-    composeUVTexture()
-  }, [composeUVTexture, stripedDesignTexture])
-
-  useEffect(() => {
-    composeUVTexture()
-  }, [composeUVTexture, stripedDesign])
 
   useEffect(() => {
     activeViewRef.current = activeView
@@ -670,9 +449,8 @@ export default function PersonalizadorPage() {
   useEffect(() => {
     if (!isPersistenceReady) return
     activeViewRef.current = activeView
-    partColorsRef.current = partColors
     persistStateNow()
-  }, [isPersistenceReady, activeView, partColors, persistTick, persistStateNow])
+  }, [isPersistenceReady, activeView, persistTick, persistStateNow])
 
   useEffect(() => {
     if (!isPersistenceReady) return
@@ -836,14 +614,15 @@ export default function PersonalizadorPage() {
   }, [])
 
   const handleResetAllChanges = useCallback(() => {
-    setPartColors({ ...DEFAULT_PART_COLORS })
     setUploadedImages([])
     setTextureCanvas(null)
+    setTextureRevision((revision) => revision + 1)
     viewContentRef.current = {}
     viewObjectsRef.current = {}
     uploadedImagesRef.current = []
+    imageCacheRef.current = {}
+    compositeCanvasRef.current = null
     unifiedHistoryRef.current = [{
-      partColors: { ...DEFAULT_PART_COLORS },
       viewObjects: {},
       viewContent: {},
       uploadedImages: [],
@@ -857,11 +636,13 @@ export default function PersonalizadorPage() {
 
     try {
       localStorage.removeItem(STORAGE_KEY)
+      localStorage.removeItem(FABRIC_HISTORY_STORAGE_KEY)
     } catch {
       // ignore
     }
 
-    window.location.reload()
+    setFabricEditorRestoreRevision((revision) => revision + 1)
+    setFabricEditorRevision((revision) => revision + 1)
   }, [])
 
   const handleCloseIntroModal = useCallback(() => {
@@ -887,11 +668,11 @@ export default function PersonalizadorPage() {
         }}
       >
         {/* Left panel: 2D Editor */}
-        <div className="flex flex-1 flex-col border-b border-border lg:border-b-0 lg:border-r lg:border-border/40">
+        <div className="flex flex-1 flex-col">
           {/* Toolbar + Canvas area */}
           <div className="flex flex-1 flex-col md:flex-row">
             {/* Toolbar - horizontal on mobile, vertical on desktop - compact */}
-            <div className="flex shrink-0 items-start justify-center border-b border-border/40 p-1.5 md:items-start md:border-b-0 md:border-r md:border-border/40 md:p-2">
+            <div className="flex shrink-0 items-start justify-center p-1.5 md:items-start md:p-2">
               <Toolbar
                 onImageUpload={handleImageUpload}
                 onAddText={handleAddText}
@@ -899,11 +680,7 @@ export default function PersonalizadorPage() {
                 onAddUploadedImage={handleAddUploadedImage}
                 onRemoveUploadedImage={handleRemoveUploadedImage}
                 uploadedImages={uploadedImages}
-                partColors={partColors}
-                onPartColorChange={handlePartColorChange}
                 onLastFontFamilyChange={onLastFontFamilyChange}
-                onApplyStripedDesign={handleApplyStripedDesign}
-                initialStripedDesign={stripedDesign}
               />
             </div>
 
@@ -940,7 +717,7 @@ export default function PersonalizadorPage() {
           </div>
 
           {/* Template selector buttons - below canvas */}
-          <div className="border-t border-border/40 bg-card/60 px-3 py-3 backdrop-blur-sm">
+          <div className="bg-card/60 px-3 py-3 backdrop-blur-sm">
             <TemplateSelector activeView={activeView} onViewChange={setActiveView} />
           </div>
         </div>
@@ -977,7 +754,7 @@ export default function PersonalizadorPage() {
             </div>
 
             {/* 3D Background Color Control */}
-            <div className="border-t border-border/40 bg-card/70 backdrop-blur-sm p-3">
+            <div className="bg-card/70 backdrop-blur-sm p-3">
               <div className="flex flex-col gap-2">
                 <label className="flex items-center justify-between text-xs font-semibold text-foreground">
                   <span>Color de fondo</span>
@@ -996,7 +773,7 @@ export default function PersonalizadorPage() {
           </div>
 
           {/* Action buttons */}
-          <div className="border-t border-border/40 p-4">
+          <div className="p-4">
             <div className="flex flex-col gap-2">
               <div className="flex gap-2">
                 <button 

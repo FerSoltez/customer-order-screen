@@ -1,21 +1,13 @@
 "use client"
 
-import { Upload, ImageIcon, Type, Palette, X, ChevronDown, ChevronUp, Layers } from "lucide-react"
-import { useRef, useState, useEffect } from "react"
+import { useEffect, useRef, useState } from "react"
 import Image from "next/image"
-import { ColorPalette } from "./color-palette"
+import { Upload, ImageIcon, Type, X } from "lucide-react"
 
 interface UploadedImage {
   id: string
   name: string
   dataUrl: string
-}
-
-interface StripedDesignConfig {
-  enabled: boolean
-  color1: string
-  color2: string
-  stripeCount: number
 }
 
 interface ToolbarProps {
@@ -25,17 +17,7 @@ interface ToolbarProps {
   onAddUploadedImage: (dataUrl: string) => void
   onRemoveUploadedImage?: (id: string) => void
   uploadedImages: UploadedImage[]
-  partColors: {
-    frente: string
-    espalda: string
-    manga_izquierda: string
-    manga_derecha: string
-    cuello: string
-  }
-  onPartColorChange: (part: "frente" | "espalda" | "manga_izquierda" | "manga_derecha" | "cuello", color: string) => void
   onLastFontFamilyChange?: (fontFamily: string) => void
-  onApplyStripedDesign?: (config: StripedDesignConfig) => void
-  initialStripedDesign?: StripedDesignConfig
 }
 
 const FONT_OPTIONS = [
@@ -46,35 +28,27 @@ const FONT_OPTIONS = [
 
 const MAX_TEXT_LENGTH = 15
 
-export function Toolbar({ onImageUpload, onAddText, onUpdateSelectedTextStyle, onAddUploadedImage, onRemoveUploadedImage, uploadedImages, partColors, onPartColorChange, onLastFontFamilyChange, onApplyStripedDesign, initialStripedDesign }: ToolbarProps) {
+export function Toolbar({
+  onImageUpload,
+  onAddText,
+  onUpdateSelectedTextStyle,
+  onAddUploadedImage,
+  onRemoveUploadedImage,
+  uploadedImages,
+  onLastFontFamilyChange,
+}: ToolbarProps) {
   const imageInputRef = useRef<HTMLInputElement>(null)
   const toolbarRef = useRef<HTMLDivElement>(null)
-  const [activePanel, setActivePanel] = useState<"colores" | "subidos" | "texto" | "disenos" | null>(null)
-  const [expandedParts, setExpandedParts] = useState<Record<string, boolean>>({
-    frente: false,
-    espalda: false,
-    manga_izquierda: false,
-    manga_derecha: false,
-    cuello: false,
-  })
+  const [activePanel, setActivePanel] = useState<"subidos" | "texto" | null>(null)
   const [textInput, setTextInput] = useState("Tu texto")
   const [selectedFont, setSelectedFont] = useState(FONT_OPTIONS[0].value)
   const [textColor, setTextColor] = useState("#1a1a2e")
   const [textEditMessage, setTextEditMessage] = useState<string | null>(null)
-  const [designColor1, setDesignColor1] = useState(initialStripedDesign?.color1 ?? "#1f4fa6")
-  const [designColor2, setDesignColor2] = useState(initialStripedDesign?.color2 ?? "#58a8f6")
-  const [designStripeCount, setDesignStripeCount] = useState(initialStripedDesign?.stripeCount ?? 5)
-  const [designEnabled, setDesignEnabled] = useState(initialStripedDesign?.enabled ?? false)
 
-  const togglePanel = (panel: "colores" | "subidos" | "texto" | "disenos") => {
+  const togglePanel = (panel: "subidos" | "texto") => {
     setActivePanel(activePanel === panel ? null : panel)
   }
 
-  const togglePart = (part: string) => {
-    setExpandedParts((prev) => ({ ...prev, [part]: !prev[part] }))
-  }
-
-  // Close panel when clicking outside toolbar
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (toolbarRef.current && !toolbarRef.current.contains(e.target as Node)) {
@@ -91,33 +65,9 @@ export function Toolbar({ onImageUpload, onAddText, onUpdateSelectedTextStyle, o
     }
   }, [activePanel])
 
-  useEffect(() => {
-    if (!initialStripedDesign) return
-    setDesignColor1(initialStripedDesign.color1)
-    setDesignColor2(initialStripedDesign.color2)
-    setDesignStripeCount(initialStripedDesign.stripeCount)
-    setDesignEnabled(initialStripedDesign.enabled)
-  }, [initialStripedDesign])
-
   return (
     <div className="relative flex flex-row items-start gap-0 md:flex-col" ref={toolbarRef}>
-      {/* Main toolbar buttons */}
       <div className="flex flex-row items-center gap-2 rounded-xl bg-card p-2 shadow-lg md:flex-col md:gap-3 md:p-3">
-        {/* Colores */}
-        <button
-          onClick={() => togglePanel("colores")}
-          className={`flex flex-col items-center gap-1 rounded-lg p-2 transition-colors ${
-            activePanel === "colores" ? "bg-secondary" : "hover:bg-secondary/60"
-          }`}
-          title="Editar colores"
-        >
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-secondary md:h-12 md:w-12">
-            <Palette className="h-5 w-5 text-primary md:h-6 md:w-6" />
-          </div>
-          <span className="text-[10px] font-medium text-foreground md:text-xs">Colores</span>
-        </button>
-
-        {/* Subidos */}
         <button
           onClick={() => togglePanel("subidos")}
           className={`flex flex-col items-center gap-1 rounded-lg p-2 transition-colors ${
@@ -131,7 +81,6 @@ export function Toolbar({ onImageUpload, onAddText, onUpdateSelectedTextStyle, o
           <span className="text-[10px] font-medium text-foreground md:text-xs">Subidos</span>
         </button>
 
-        {/* Imagen */}
         <button
           onClick={() => imageInputRef.current?.click()}
           className="flex flex-col items-center gap-1 rounded-lg p-2 transition-colors hover:bg-secondary/60"
@@ -154,7 +103,6 @@ export function Toolbar({ onImageUpload, onAddText, onUpdateSelectedTextStyle, o
           }}
         />
 
-        {/* Texto */}
         <button
           onClick={() => togglePanel("texto")}
           className={`flex flex-col items-center gap-1 rounded-lg p-2 transition-colors ${
@@ -167,34 +115,13 @@ export function Toolbar({ onImageUpload, onAddText, onUpdateSelectedTextStyle, o
           </div>
           <span className="text-[10px] font-medium text-foreground md:text-xs">Texto</span>
         </button>
-
-        {/* Diseños */}
-        <button
-          onClick={() => togglePanel("disenos")}
-          className={`flex flex-col items-center gap-1 rounded-lg p-2 transition-colors ${
-            activePanel === "disenos" ? "bg-secondary" : "hover:bg-secondary/60"
-          }`}
-          title="Diseños"
-        >
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-secondary md:h-12 md:w-12">
-            <Layers className="h-5 w-5 text-primary md:h-6 md:w-6" />
-          </div>
-          <span className="text-[10px] font-medium text-foreground md:text-xs">Diseños</span>
-        </button>
       </div>
 
-      {/* Expandable panels */}
       {activePanel && (
-        <div className="absolute left-0 top-full z-30 mt-2 flex max-h-[340px] w-72 flex-col overflow-hidden rounded-xl border border-border bg-card shadow-xl md:left-full md:top-0 md:ml-3 md:mt-0 md:max-h-[500px] md:w-80 sm:w-screen sm:left-0 sm:right-0 sm:mx-auto sm:max-w-sm">
-          <div className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
+        <div className="absolute left-0 top-full z-30 mt-2 flex max-h-[340px] w-72 flex-col overflow-hidden rounded-xl bg-card shadow-xl md:left-full md:top-0 md:ml-3 md:mt-0 md:max-h-[500px] md:w-80 sm:left-0 sm:right-0 sm:mx-auto sm:w-screen sm:max-w-sm">
+          <div className="flex items-center justify-between gap-3 px-4 py-3">
             <h3 className="text-sm font-bold text-foreground">
-              {activePanel === "colores"
-                ? "Colores"
-                : activePanel === "subidos"
-                  ? "Archivos Subidos"
-                  : activePanel === "disenos"
-                    ? "Diseños"
-                    : "Agregar Texto"}
+              {activePanel === "subidos" ? "Archivos Subidos" : "Agregar Texto"}
             </h3>
             <button
               onClick={() => setActivePanel(null)}
@@ -344,237 +271,6 @@ export function Toolbar({ onImageUpload, onAddText, onUpdateSelectedTextStyle, o
 
                 {textEditMessage && (
                   <p className="text-xs text-muted-foreground">{textEditMessage}</p>
-                )}
-              </div>
-            )}
-
-            {activePanel === "disenos" && (
-              <div className="flex flex-col gap-4">
-                <div className="rounded-lg border border-border bg-background p-3">
-                  <p className="text-sm font-semibold text-foreground">Rayas Horizontales (Tackle)</p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Aplica un patron de rayas alternadas en frente, espalda y mangas respetando el mapa UV.
-                  </p>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="flex flex-col gap-1">
-                    <label htmlFor="design-color-1" className="text-xs font-medium text-muted-foreground">
-                      Color 1
-                    </label>
-                    <input
-                      id="design-color-1"
-                      type="color"
-                      value={designColor1}
-                      onChange={(e) => setDesignColor1(e.target.value)}
-                      className="h-9 w-full cursor-pointer rounded-md border border-border bg-background p-1"
-                    />
-                  </div>
-
-                  <div className="flex flex-col gap-1">
-                    <label htmlFor="design-color-2" className="text-xs font-medium text-muted-foreground">
-                      Color 2
-                    </label>
-                    <input
-                      id="design-color-2"
-                      type="color"
-                      value={designColor2}
-                      onChange={(e) => setDesignColor2(e.target.value)}
-                      className="h-9 w-full cursor-pointer rounded-md border border-border bg-background p-1"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex flex-col gap-1">
-                  <label htmlFor="design-stripe-count" className="text-xs font-medium text-muted-foreground">
-                    Numero de rayas: {designStripeCount}
-                  </label>
-                  <input
-                    id="design-stripe-count"
-                    type="range"
-                    min={2}
-                    max={10}
-                    step={1}
-                    value={designStripeCount}
-                    onChange={(e) => setDesignStripeCount(Number(e.target.value))}
-                    className="w-full"
-                  />
-                </div>
-
-                <div className="overflow-hidden rounded-lg border border-border">
-                  <div style={{ backgroundColor: designColor1 }} className="h-5 w-full" />
-                  <div style={{ backgroundColor: designColor2 }} className="h-5 w-full" />
-                  <div style={{ backgroundColor: designColor1 }} className="h-5 w-full" />
-                  <div style={{ backgroundColor: designColor2 }} className="h-5 w-full" />
-                </div>
-
-                <button
-                  onClick={() => {
-                    const nextEnabled = true
-                    setDesignEnabled(nextEnabled)
-                    onApplyStripedDesign?.({
-                      enabled: nextEnabled,
-                      color1: designColor1,
-                      color2: designColor2,
-                      stripeCount: designStripeCount,
-                    })
-                  }}
-                  className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-primary-foreground transition-colors hover:bg-primary/90"
-                >
-                  Aplicar Tackle
-                </button>
-
-                <button
-                  onClick={() => {
-                    setDesignEnabled(false)
-                    onApplyStripedDesign?.({
-                      enabled: false,
-                      color1: designColor1,
-                      color2: designColor2,
-                      stripeCount: designStripeCount,
-                    })
-                  }}
-                  className="rounded-lg border border-border bg-card px-4 py-2 text-sm font-bold text-foreground transition-colors hover:bg-secondary"
-                >
-                  Quitar diseno
-                </button>
-
-                <p className="text-xs text-muted-foreground">
-                  Estado: {designEnabled ? "Activo" : "Inactivo"}
-                </p>
-              </div>
-            )}
-
-            {activePanel === "colores" && (
-              <div className="flex flex-col gap-2">
-                <button
-                  onClick={() => togglePart("frente")}
-                  className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary/50"
-                >
-                  <span className="flex items-center gap-2">
-                    <div
-                      className="h-5 w-5 rounded border border-border"
-                      style={{ backgroundColor: partColors.frente }}
-                    />
-                    Frente
-                  </span>
-                  {expandedParts.frente ? (
-                    <ChevronUp className="h-4 w-4" />
-                  ) : (
-                    <ChevronDown className="h-4 w-4" />
-                  )}
-                </button>
-                {expandedParts.frente && (
-                  <div className="px-2 pb-3">
-                    <ColorPalette
-                      selected={partColors.frente}
-                      onSelect={(color) => onPartColorChange("frente", color)}
-                    />
-                  </div>
-                )}
-
-                <button
-                  onClick={() => togglePart("espalda")}
-                  className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary/50"
-                >
-                  <span className="flex items-center gap-2">
-                    <div
-                      className="h-5 w-5 rounded border border-border"
-                      style={{ backgroundColor: partColors.espalda }}
-                    />
-                    Espalda
-                  </span>
-                  {expandedParts.espalda ? (
-                    <ChevronUp className="h-4 w-4" />
-                  ) : (
-                    <ChevronDown className="h-4 w-4" />
-                  )}
-                </button>
-                {expandedParts.espalda && (
-                  <div className="px-2 pb-3">
-                    <ColorPalette
-                      selected={partColors.espalda}
-                      onSelect={(color) => onPartColorChange("espalda", color)}
-                    />
-                  </div>
-                )}
-
-                <button
-                  onClick={() => togglePart("manga_izquierda")}
-                  className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary/50"
-                >
-                  <span className="flex items-center gap-2">
-                    <div
-                      className="h-5 w-5 rounded border border-border"
-                      style={{ backgroundColor: partColors.manga_derecha }}
-                    />
-                    Manga Izquierda
-                  </span>
-                  {expandedParts.manga_izquierda ? (
-                    <ChevronUp className="h-4 w-4" />
-                  ) : (
-                    <ChevronDown className="h-4 w-4" />
-                  )}
-                </button>
-                {expandedParts.manga_izquierda && (
-                  <div className="px-2 pb-3">
-                    <ColorPalette
-                      selected={partColors.manga_derecha}
-                      onSelect={(color) => onPartColorChange("manga_derecha", color)}
-                    />
-                  </div>
-                )}
-
-                <button
-                  onClick={() => togglePart("manga_derecha")}
-                  className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary/50"
-                >
-                  <span className="flex items-center gap-2">
-                    <div
-                      className="h-5 w-5 rounded border border-border"
-                      style={{ backgroundColor: partColors.manga_izquierda }}
-                    />
-                    Manga Derecha
-                  </span>
-                  {expandedParts.manga_derecha ? (
-                    <ChevronUp className="h-4 w-4" />
-                  ) : (
-                    <ChevronDown className="h-4 w-4" />
-                  )}
-                </button>
-                {expandedParts.manga_derecha && (
-                  <div className="px-2 pb-3">
-                    <ColorPalette
-                      selected={partColors.manga_izquierda}
-                      onSelect={(color) => onPartColorChange("manga_izquierda", color)}
-                    />
-                  </div>
-                )}
-
-                <button
-                  onClick={() => togglePart("cuello")}
-                  className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary/50"
-                >
-                  <span className="flex items-center gap-2">
-                    <div
-                      className="h-5 w-5 rounded border border-border"
-                      style={{ backgroundColor: partColors.cuello }}
-                    />
-                    Cuello
-                  </span>
-                  {expandedParts.cuello ? (
-                    <ChevronUp className="h-4 w-4" />
-                  ) : (
-                    <ChevronDown className="h-4 w-4" />
-                  )}
-                </button>
-                {expandedParts.cuello && (
-                  <div className="px-2 pb-3">
-                    <ColorPalette
-                      selected={partColors.cuello}
-                      onSelect={(color) => onPartColorChange("cuello", color)}
-                    />
-                  </div>
                 )}
               </div>
             )}

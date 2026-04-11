@@ -34,8 +34,49 @@ function TShirtModel({ bodyColor, textureCanvas, textureRevision = 0, onReady }:
     gl.outputColorSpace = THREE.SRGBColorSpace
   }, [gl])
 
+  const clearAppliedTexture = useCallback(() => {
+    clonedScene.traverse((child) => {
+      if (!(child as THREE.Mesh).isMesh) return
+      const mesh = child as THREE.Mesh
+      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+
+      materials.forEach((mat) => {
+        if (!mat) return
+        const textureMat = mat as THREE.Material & {
+          map?: THREE.Texture | null
+          color?: THREE.Color
+          roughness?: number
+          needsUpdate: boolean
+          name?: string
+        }
+
+        const meshName = (mesh.name || "").toLowerCase()
+        const materialName = (textureMat.name || "").toLowerCase()
+        const isInterior = meshName.includes("interior") || materialName.includes("interior")
+        if (isInterior) {
+          if (textureMat.map === appliedTextureRef.current) {
+            textureMat.map = null
+          }
+          textureMat.needsUpdate = true
+          return
+        }
+
+        textureMat.map = null
+        textureMat.needsUpdate = true
+      })
+    })
+
+    if (appliedTextureRef.current) {
+      appliedTextureRef.current.dispose()
+      appliedTextureRef.current = null
+    }
+  }, [clonedScene])
+
   useEffect(() => {
-    if (!textureCanvas) return
+    if (!textureCanvas) {
+      clearAppliedTexture()
+      return
+    }
 
     const maxAnisotropy = Math.max(1, gl.capabilities.getMaxAnisotropy())
     const nextTexture = new THREE.CanvasTexture(textureCanvas)
@@ -148,7 +189,7 @@ function TShirtModel({ bodyColor, textureCanvas, textureRevision = 0, onReady }:
     }
     appliedTextureRef.current = nextTexture
     onReady?.()
-  }, [clonedScene, gl, onReady, textureCanvas, textureRevision])
+  }, [clearAppliedTexture, clonedScene, gl, onReady, textureCanvas, textureRevision])
 
   useEffect(() => {
     return () => {
@@ -188,11 +229,9 @@ export function TShirtPreview3D({ bodyColor, textureCanvas, textureRevision = 0 
   const [isLoadingTexture, setIsLoadingTexture] = useState(false)
   const prevTextureRevisionRef = useRef<number>(-1)
   const textureLoadTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-  const [displayedTextureRevision, setDisplayedTextureRevision] = useState(0)
   
   const handleModelReady = useCallback(() => {
     setIsModelReady(true)
-    setDisplayedTextureRevision(textureRevision)
     prevTextureRevisionRef.current = textureRevision
   }, [textureRevision])
   
@@ -207,9 +246,8 @@ export function TShirtPreview3D({ bodyColor, textureCanvas, textureRevision = 0 
       if (textureLoadTimeoutRef.current) {
         clearTimeout(textureLoadTimeoutRef.current)
       }
-      // Wait a bit then update displayed texture (with timeout fallback)
+      // Keep only the loading indicator delay; texture revision is applied immediately.
       textureLoadTimeoutRef.current = setTimeout(() => {
-        setDisplayedTextureRevision(textureRevision)
         setIsLoadingTexture(false)
       }, 180)
       prevTextureRevisionRef.current = textureRevision
@@ -251,7 +289,7 @@ export function TShirtPreview3D({ bodyColor, textureCanvas, textureRevision = 0 
         <directionalLight position={[5, 5, 5]} intensity={0.5} />
         <directionalLight position={[-3, 3, -3]} intensity={0.15} />
         <Suspense fallback={<LoadingFallback />}>
-          <TShirtModel bodyColor={bodyColor} textureCanvas={textureCanvas} textureRevision={displayedTextureRevision} onReady={handleModelReady} />
+          <TShirtModel bodyColor={bodyColor} textureCanvas={textureCanvas} textureRevision={textureRevision} onReady={handleModelReady} />
           <Environment preset="studio" />
         </Suspense>
         <OrbitControls
