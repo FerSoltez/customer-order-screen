@@ -66,7 +66,7 @@ const templateRenderConfig: Record<string, { scale: number; offsetX: number; off
 const MANGAS_INTRO_KEY = "darklion-personalizador-mangas-intro-v1"
 const HISTORY_STORAGE_KEY = "darklion-personalizador-history-v1"
 const FABRIC_EXPORT_TARGET_SIZE = 2048
-const MAX_PASTED_TEXT_LENGTH = 15
+const MAX_TEXT_LENGTH = 15
 
 const isCanvasImageSource = (value: unknown): value is CanvasImageSource => {
   if (!value) return false
@@ -792,6 +792,7 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
       }))
       const zoneIndicators: Record<number, any> = {}
       const zoneRects: Record<number, any> = {}
+      const isFrontCenterZone = (zoneIndex: number) => viewKey === "frente" && zoneIndex === 2
 
       // Build zone rectangle map after template zones have been created.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -834,12 +835,17 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const occupied = canvas.getObjects().some((o: any) => isObjectInZone(o, zone, zoneIndex))
         rect.evented = !occupied
-        rect.hoverCursor = occupied ? "default" : "pointer"
+        rect.hoverCursor = occupied ? "default" : (isFrontCenterZone(zoneIndex) ? "text" : "pointer")
       }
 
       const updateZoneIndicatorVisibility = (zoneIndex: number) => {
         const indicator = zoneIndicators[zoneIndex]
         if (!indicator) return
+        if (isFrontCenterZone(zoneIndex)) {
+          indicator.visible = false
+          updateZoneRectState(zoneIndex)
+          return
+        }
         const zone = zonesPx[zoneIndex]
         if (!zone) {
           indicator.visible = false
@@ -960,6 +966,7 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
       }
 
       const addImageToZone = async (zoneIndex: number, dataUrl: string) => {
+        if (isFrontCenterZone(zoneIndex)) return
         const zone = getZoneByIndex(zoneIndex)
         if (!zone) return
 
@@ -1016,7 +1023,41 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
         canvas.requestRenderAll()
       }
 
+      const addTextToZone = (zoneIndex: number) => {
+        const zone = getZoneByIndex(zoneIndex)
+        if (!zone || !fabricModuleRef.current) return
+        const fabric = fabricModuleRef.current
+        const txt = new fabric.IText("Tu texto", {
+          left: zone.left + zone.width / 2,
+          top: zone.top + zone.height / 2,
+          originX: "center",
+          originY: "center",
+          fontSize: 28,
+          fill: "#1a1a2e",
+          fontFamily: lastFontFamilyRef.current,
+        })
+        txt._preferredZoneIndex = zoneIndex
+        txt._zoneIndex = zoneIndex
+        txt._autoFitted = true
+        canvas.add(txt)
+        canvas.setActiveObject(txt)
+        enforceMinimumSize(txt, { width: zone.width, height: zone.height })
+        clampObjectInsideZones(txt)
+        syncZoneIndicators()
+        if (typeof txt.enterEditing === "function") {
+          txt.enterEditing()
+          if (typeof txt.selectAll === "function") {
+            txt.selectAll()
+          }
+        }
+        canvas.requestRenderAll()
+      }
+
       const openZoneImagePicker = (zoneIndex: number) => {
+        if (isFrontCenterZone(zoneIndex)) {
+          addTextToZone(zoneIndex)
+          return
+        }
         const fileInput = document.createElement("input")
         fileInput.type = "file"
         fileInput.accept = "image/*"
@@ -1044,20 +1085,49 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
         openZoneImagePicker(zoneIndex)
       })
 
+      const clampTextLength = (obj: any) => {
+        if (!obj) return
+        const isText = obj?.isType?.("i-text") || obj?.isType?.("text") || obj?.isType?.("textbox") ||
+          obj?.type === "i-text" || obj?.type === "text" || obj?.type === "textbox"
+        if (!isText) return
+        const raw = `${obj.text ?? ""}`
+        const normalized = raw.replace(/\r?\n/g, " ")
+        const nextText = normalized.length > MAX_TEXT_LENGTH
+          ? normalized.slice(0, MAX_TEXT_LENGTH)
+          : normalized
+        if (nextText === raw) return
+        obj.text = nextText
+        if (typeof obj.selectionStart === "number") {
+          obj.selectionStart = Math.min(obj.selectionStart, MAX_TEXT_LENGTH)
+        }
+        if (typeof obj.selectionEnd === "number") {
+          obj.selectionEnd = Math.min(obj.selectionEnd, MAX_TEXT_LENGTH)
+        }
+        obj.setCoords()
+        canvas.requestRenderAll()
+      }
+
+      canvas.on("text:changed", (e: { target?: any }) => {
+        if (isLoadingRef.current) return
+        clampTextLength(e?.target)
+      })
+
       const pickZoneForObject = (obj: any): PixelZone | null => {
         if (zonesPx.length === 0) return null
+        const zonesForPick = zonesPx.filter((_, idx) => !(obj?.type === "image" && isFrontCenterZone(idx)))
+        if (zonesForPick.length === 0) return null
         const center = obj.getCenterPoint?.()
-        if (!center) return zonesPx[0]
+        if (!center) return zonesForPick[0]
 
-        for (const z of zonesPx) {
+        for (const z of zonesForPick) {
           const insideX = center.x >= z.left && center.x <= z.left + z.width
           const insideY = center.y >= z.top && center.y <= z.top + z.height
           if (insideX && insideY) return z
         }
 
-        let best = zonesPx[0]
+        let best = zonesForPick[0]
         let bestDist = Number.POSITIVE_INFINITY
-        zonesPx.forEach((z) => {
+        zonesForPick.forEach((z) => {
           const zx = z.left + z.width / 2
           const zy = z.top + z.height / 2
           const d = (center.x - zx) ** 2 + (center.y - zy) ** 2
@@ -1130,6 +1200,14 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
         const zH = z.h * canvasHeight
         // Auto-scale images to fit zone
         if (obj.type === "image") {
+          // Validate: Centro zone in Frente only accepts text
+          if (viewKey === "frente" && boundedZoneIndex === 2) {
+            canvas.remove(obj)
+            canvas.discardActiveObject()
+            canvas.requestRenderAll()
+            window.alert("La zona central del molde FRENTE solo permite textos, no imágenes.")
+            return
+          }
           configureImageObject(obj)
           const s = Math.min(zW / (obj.width || 1), zH / (obj.height || 1)) * 0.9
           obj.set({
@@ -1251,9 +1329,9 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
 
         try {
           const text = await navigator.clipboard.readText()
-          const trimmedText = text?.trim() || ""
+          const trimmedText = (text || "").replace(/\r?\n/g, " ").trim()
           if (!trimmedText) return
-          const clippedText = trimmedText.slice(0, MAX_PASTED_TEXT_LENGTH)
+          const clippedText = trimmedText.slice(0, MAX_TEXT_LENGTH)
           if (!clippedText) return
           const txt = new fabric.IText(clippedText, {
             left: canvasWidth / 2,
@@ -1288,6 +1366,22 @@ export function FabricEditor({ activeView, restoreRevision = 0, onCanvasReady, o
           target.tagName === "TEXTAREA" ||
           target.isContentEditable
         )
+
+        // Prevent line breaks in canvas text editing.
+        if (e.key === "Enter" && activeCanvasRef.current === canvasEl) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const editingObj = canvas.getActiveObject() as any
+          if (editingObj?.isEditing) {
+            e.preventDefault()
+            e.stopPropagation()
+            clampTextLength(editingObj)
+            if (typeof editingObj.exitEditing === "function") {
+              editingObj.exitEditing()
+            }
+            canvas.requestRenderAll()
+            return
+          }
+        }
 
         if (!isTypingTarget && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") {
           // Only paste in the canvas that currently has the mouse pointer

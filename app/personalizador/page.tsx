@@ -684,48 +684,50 @@ export default function PersonalizadorPage() {
               />
             </div>
 
-            {/* Canvas editor - takes up more space */}
-            <div className="relative flex flex-1 flex-col overflow-hidden">
-              {isPersistenceReady ? (
-                <FabricEditor
-                  key={fabricEditorRevision}
-                  activeView={activeView}
-                  restoreRevision={fabricEditorRestoreRevision}
-                  onCanvasReady={handleCanvasReady}
-                  onCanvasUpdate={handleCanvasUpdate}
-                  initialViewObjects={initialViewObjects}
-                  onViewObjectsChange={handleViewObjectsChange}
-                  onGlobalUndo={handleUnifiedUndo}
-                  onGlobalRedo={handleUnifiedRedo}
-                  canGlobalUndo={canUnifiedUndo}
-                  canGlobalRedo={canUnifiedRedo}
-                  onCanvasStateChange={scheduleCanvasHistoryRecord}
-                  lastFontFamily={lastFontFamilyRef.current}
-                  onLastFontFamilyChange={onLastFontFamilyChange}
-                  globalHistoryActionAt={globalHistoryActionAt}
-                  historyRestoreAt={historyRestoreTick}
-                />
-              ) : (
-                <div className="flex h-full w-full items-center justify-center">
-                  <div className="flex flex-col items-center gap-3">
-                    <div className="h-10 w-10 animate-spin rounded-full border-4 border-secondary border-t-primary" />
-                    <span className="text-sm text-muted-foreground">Restaurando diseño...</span>
+            <div className="flex min-h-0 flex-1 flex-col">
+              {/* Canvas editor - takes up more space */}
+              <div className="relative flex flex-1 flex-col overflow-hidden">
+                {isPersistenceReady ? (
+                  <FabricEditor
+                    key={fabricEditorRevision}
+                    activeView={activeView}
+                    restoreRevision={fabricEditorRestoreRevision}
+                    onCanvasReady={handleCanvasReady}
+                    onCanvasUpdate={handleCanvasUpdate}
+                    initialViewObjects={initialViewObjects}
+                    onViewObjectsChange={handleViewObjectsChange}
+                    onGlobalUndo={handleUnifiedUndo}
+                    onGlobalRedo={handleUnifiedRedo}
+                    canGlobalUndo={canUnifiedUndo}
+                    canGlobalRedo={canUnifiedRedo}
+                    onCanvasStateChange={scheduleCanvasHistoryRecord}
+                    lastFontFamily={lastFontFamilyRef.current}
+                    onLastFontFamilyChange={onLastFontFamilyChange}
+                    globalHistoryActionAt={globalHistoryActionAt}
+                    historyRestoreAt={historyRestoreTick}
+                  />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center">
+                    <div className="flex flex-col items-center gap-3">
+                      <div className="h-10 w-10 animate-spin rounded-full border-4 border-secondary border-t-primary" />
+                      <span className="text-sm text-muted-foreground">Restaurando diseño...</span>
+                    </div>
                   </div>
-                </div>
-              )}
-            </div>
-          </div>
+                )}
+              </div>
 
-          {/* Template selector buttons - below canvas */}
-          <div className="bg-card/60 px-3 py-3 backdrop-blur-sm">
-            <TemplateSelector activeView={activeView} onViewChange={setActiveView} />
+              {/* Template selector buttons - below canvas */}
+              <div className="bg-card/60 px-3 py-3 backdrop-blur-sm">
+                <TemplateSelector activeView={activeView} onViewChange={setActiveView} />
+              </div>
+            </div>
           </div>
         </div>
 
         {/* Right panel: 3D Preview + Action buttons */}
-        <div className="flex flex-col lg:w-[380px] xl:w-[440px]">
+        <div className="flex flex-col flex-1 lg:flex-none lg:w-[380px] xl:w-[440px]">
           {/* 3D viewer with background controls */}
-          <div className="relative flex-1 flex flex-col" style={{ minHeight: 320 }}>
+          <div className="relative flex flex-col h-[52vh] sm:h-[520px] lg:h-full lg:flex-1 overflow-hidden">
             {/* Tooltip for 3D interaction info */}
             <div className="absolute top-2 right-2 z-10">
               <Tooltip>

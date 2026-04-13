@@ -17,8 +17,8 @@ const templates: { id: TemplateView; label: string; image: string }[] = [
 
 export function TemplateSelector({ activeView, onViewChange }: TemplateSelectorProps) {
   return (
-    <div className="flex items-center justify-end gap-6" style={{ marginRight: "0px" }}>
-      <div className="flex items-center gap-4" style={{ marginRight: "290px" }}>
+    <div className="flex w-full items-center justify-center gap-6">
+      <div className="flex items-center gap-4">
         {templates.map((template) => (
           <button
             key={template.id}

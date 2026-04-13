@@ -263,7 +263,7 @@ export function TShirtPreview3D({ bodyColor, textureCanvas, textureRevision = 0 
   }, [])
 
   return (
-    <div className="relative h-full w-full" style={{ minHeight: 300 }}>
+    <div className="relative h-full w-full min-h-[320px] sm:min-h-[400px] overflow-hidden">
       {!isModelReady && (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/80 backdrop-blur-[1px]">
           <div className="flex flex-col items-center gap-3 rounded-xl border border-border bg-card px-5 py-4 shadow-lg">
@@ -281,6 +281,7 @@ export function TShirtPreview3D({ bodyColor, textureCanvas, textureRevision = 0 
         </div>
       )}
       <Canvas
+        className="h-full w-full"
         camera={{ position: [0, 0, 0.7], fov: 55 }}
         gl={{ preserveDrawingBuffer: false, antialias: true, logarithmicDepthBuffer: true, powerPreference: "high-performance" }}
       >
